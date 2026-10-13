@@ -18,7 +18,14 @@ interface SaltedCase {
 
 const vectors = JSON.parse(
   readFileSync(
-    resolve(import.meta.dirname, "..", "..", "vectors", "salted-digest-commitment", "vectors.json"),
+    resolve(
+      import.meta.dirname,
+      "..",
+      "..",
+      "vectors",
+      "salted-digest-commitment",
+      "vectors.json",
+    ),
     "utf8",
   ),
 ) as {
@@ -27,7 +34,8 @@ const vectors = JSON.parse(
   equality: { nonce: string; text: string; first: string };
 };
 
-const jcsText = (value: unknown): string => new TextDecoder().decode(jcs(value));
+const jcsText = (value: unknown): string =>
+  new TextDecoder().decode(jcs(value));
 const positive = new Map(vectors.positive.map((c) => [c.id, c.commitment]));
 
 describe("salted JSON-DIGEST commitment vectors", () => {
