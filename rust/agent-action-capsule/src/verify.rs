@@ -383,12 +383,16 @@ pub fn verify_with(
         }
     }
 
+    // Sub-block type checks, in the Python reference's order. The §-02
+    // addendum's self_reported_reasoning block and its scalar domain and
+    // provenance members are typed the same way.
     for field in [
         "effect",
         "assurance",
         "disposition",
         "chain",
         "cross_party",
+        "self_reported_reasoning",
         "provenance_mode",
     ] {
         if let Some(v) = capsule_map.get(field) {
@@ -400,6 +404,17 @@ pub fn verify_with(
                     "error",
                 ));
             }
+        }
+    }
+
+    for field in ["domain", "provenance"] {
+        if matches!(capsule_map.get(field), Some(v) if !v.is_string()) {
+            findings.push(mkf(
+                &format!("{field}_not_string"),
+                &format!("{field} MUST be a string when present (§-02)"),
+                Some(1),
+                "error",
+            ));
         }
     }
 

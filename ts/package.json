@@ -45,9 +45,6 @@
     "typecheck": "tsc --noEmit",
     "check:package": "node scripts/check-package.mjs"
   },
-  "dependencies": {
-    "cborg": "6.1.2"
-  },
   "devDependencies": {
     "@types/jsdom": "30.0.0",
     "@types/node": "22.20.2",
