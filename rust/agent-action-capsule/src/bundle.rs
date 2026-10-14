@@ -1,6 +1,5 @@
-//! AAC Evidence Bundle v2 codec and verifier -- Rust sibling of `go/bundle`
-//! and `ts/bundle`, sharing their conformance vectors (`testdata/vectors.json`
-//! is a pinned copy of `vectors/bundle/vectors.json`).
+//! AAC Evidence Bundle v2 codec and verifier. Port of `go/bundle` and the
+//! TypeScript `/bundle` export, checked against `vectors/bundle/`.
 //!
 //! The verifier deliberately reports graph closure, interval coverage, and
 //! per-record membership separately. The CLL range proof used for interval
@@ -22,16 +21,11 @@
 //! implementing it. When that member is drafted, wire `scitt-cose-receipt`
 //! in as a second, additive authentication path here.
 
-pub mod canonical;
-pub mod disclosure;
-pub mod references;
-pub mod verify;
-
+use crate::canonical::{self, CanonicalError};
+use crate::{disclosure, verify};
 use base64::Engine as _;
-use canonical::CanonicalError;
 use cll::mmr;
 use cll::range_proof::{self, RangeProof};
-use serde::de::Deserialize;
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
@@ -156,11 +150,7 @@ pub fn decode_fragment(fragment: &str) -> Result<Value, DecodeError> {
         return Err(DecodeError::NotBase64Url);
     }
     let raw = B64.decode(fragment).map_err(|_| DecodeError::NotUtf8Json)?;
-    let text = std::str::from_utf8(&raw).map_err(|_| DecodeError::NotUtf8Json)?;
-    let mut de = serde_json::Deserializer::from_str(text);
-    let value = Value::deserialize(&mut de).map_err(|_| DecodeError::NotUtf8Json)?;
-    de.end().map_err(|_| DecodeError::NotUtf8Json)?;
-    Ok(value)
+    crate::json::decode(&raw).map_err(|_| DecodeError::NotUtf8Json)
 }
 
 /// Returns the v2 bundle digest, omitting only `countersignatures`.
