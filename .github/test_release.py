@@ -129,6 +129,21 @@ def test_bump_cargo_updates_manifest_and_own_lock_entry(repo: Path) -> None:
     assert 'name = "serde"\nversion = "0.2.3"' in lock
 
 
+def test_bump_cargo_updates_path_dependents_lockfiles(repo: Path) -> None:
+    """A crate used by another crate's path dependency is bumped in that lock too."""
+    (repo / "book").mkdir()
+    (repo / "book/Cargo.toml").write_text(CARGO.replace('name = "demo"', 'name = "book"'))
+    (repo / "book/Cargo.lock").write_text(CARGO_LOCK + '\n[[package]]\nname = "book"\nversion = "0.2.3"\n')
+    config = {**CONFIG, "crates/book": {"kind": "cargo", "manifest": "book/Cargo.toml",
+                                        "lockfile": "book/Cargo.lock", "tag_prefix": "crates/book-v",
+                                        "workflow": "publish-rust.yml"}}
+    assert release.bump(repo, config["crates/demo"], "patch", config) == "0.2.4"
+    book_lock = (repo / "book/Cargo.lock").read_text()
+    assert 'name = "demo"\nversion = "0.2.4"' in book_lock
+    assert 'name = "book"\nversion = "0.2.3"' in book_lock
+    assert 'name = "serde"\nversion = "0.2.3"' in book_lock
+
+
 def test_bump_refuses_an_inherited_version(repo: Path) -> None:
     (repo / "rust/Cargo.toml").write_text(CARGO.replace('version = "0.2.3"', "version.workspace = true"))
     with pytest.raises((ValueError, KeyError)):
@@ -191,6 +206,7 @@ def test_check_accepts_the_matching_tag_on_main(repo: Path, name: str, tag: str)
         ("ts", "ts/v0.1.1", "does not match"),
         ("ts", "python/v0.1.0", "not a ts/v"),
         ("crates/demo", "crates/other-v0.2.3", "not a crates/demo-v"),
+        ("crates/demo", "crates/demo-v0.2.3-rc.1", "not a crates/demo-v"),
     ],
 )
 def test_check_rejects_foreign_and_mismatched_tags(repo: Path, name: str, tag: str, message: str) -> None:

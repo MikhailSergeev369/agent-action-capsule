@@ -13,10 +13,11 @@ on:
 permissions:
   contents: read
 
-# One group per tag: a shared group keeps only one pending run and would
-# cancel a queued publish for another version.
+# One publish at a time for this package, so the dist-tag choice below sees
+# npm as the previous publish left it. GitHub keeps one pending run per group,
+# so a third release queued behind two is cancelled; re-run it.
 concurrency:
-  group: npm-publish-${{ github.event.release.tag_name || github.ref_name }}
+  group: npm-publish-ts
   cancel-in-progress: false
 
 jobs:
@@ -41,12 +42,12 @@ jobs:
         shell: bash
     steps:
       - name: Check out repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name || github.ref_name }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -70,7 +71,7 @@ jobs:
           JS
 
       - name: Set up Node.js
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -94,13 +95,26 @@ jobs:
       - name: Check and build package
         run: npm run check
 
-      - name: Keep prereleases off the latest dist-tag
-        # npm refuses a prerelease without an explicit dist-tag.
+      - name: Choose the dist-tag
+        # npm refuses a prerelease without an explicit dist-tag, and `latest`
+        # must never move backward: a stable version older than npm's current
+        # `latest` (a backport, or a release that finished out of order)
+        # publishes under `backport` instead.
         run: |
-          case "$(node -p "require('./package.json').version")" in
-            *-*) echo "DIST_TAG=next" >> "$GITHUB_ENV" ;;
-            *) echo "DIST_TAG=latest" >> "$GITHUB_ENV" ;;
-          esac
+          version=$(node -p "require('./package.json').version")
+          # Only a clean answer or an explicit "not found" counts: treating a
+          # registry or network error as "no latest" could move latest backward.
+          if ! latest=$(npm view "$(node -p "require('./package.json').name")" dist-tags.latest 2>"$RUNNER_TEMP/latest-error.txt"); then
+            grep -q E404 "$RUNNER_TEMP/latest-error.txt" || { cat "$RUNNER_TEMP/latest-error.txt" >&2; exit 1; }
+            latest=""
+          fi
+          dist_tag=$(node -e '
+            const [version, latest] = process.argv.slice(1);
+            const core = (v) => v.split("-")[0].split(".").map(Number);
+            const older = (a, b) => { for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i]; return false; };
+            console.log(version.includes("-") ? "next" : latest && older(core(version), core(latest)) ? "backport" : "latest");
+          ' "$version" "$latest")
+          echo "DIST_TAG=$dist_tag" >> "$GITHUB_ENV"
 
       - name: Validate publish artifact without uploading
         run: npm publish --dry-run --access public --tag "$DIST_TAG"
