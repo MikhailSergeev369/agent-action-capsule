@@ -15,6 +15,22 @@
   `sign_envelope` refuses, before signing, any envelope the profile does not allow: a subject or
   derivation no request could carry, an empty artifact, or an `issued_at` or time `freshness`
   outside the §5.2 form.
+- Python: a requester can now read and verify the interop profile's artifact envelope (#272).
+  `evidence_request.parse_reply(octets, binding)` reads a reply, an `Envelope` or a `Refusal`,
+  in either binding, as the inverse of `Envelope.encode`. `Envelope.verify()` checks the strict
+  Ed25519 signature by `responder`, the artifact digest and each verification item's digest;
+  `Envelope.verify_for(request_bytes, responder)` also binds the profile, the pinned responder key
+  and the request as sent. `check_cll_material(envelope, trust)` reports `anchor_inclusion` for
+  the Checkpointed Local Log material (§6.2.1, steps 1 to 14), and `verify_cll_inclusion` and
+  `verify_cll_consistency` check one proof against given peaks, as Go's `VerifyCLLInclusion` and
+  `VerifyCLLConsistency` do. They reuse the profile verifier's MMR-02 code, so they need no
+  `checkpointed-local-log`. Every envelope reply in `vectors/interop-profile-v0/` gets the
+  statuses the corpus states. Like Go and Rust, `parse_reply` refuses a present but empty
+  `verification`. The shared MMR path check now refuses a path that climbs past height 52, so a
+  long proof no longer raises `OverflowError` here or in the profile reference verifier. In
+  `scripts/evidence-request-interlock.sh`, Python, Go and Rust each verify all three languages'
+  envelopes, and a new step has Python and Go check the worked example's CLL proofs and reject
+  each one altered in a path node.
 - Go: `evidencerequest.ParseReply` refuses an envelope whose `verification` is present and empty.
   The signer would have covered the empty array, but `SigningBody` omits it, so such an envelope
   verified under a signature over different members (#273).
