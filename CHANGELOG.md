@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Python: `agent_action_capsule.evidence_request.sign_envelope` builds and signs the artifact
+  response in the interop profile's form (`spec/interop-profile-v0.md` §6.2, `PROFILE =
+  "evidence-interop/0"`): `Envelope.signing_body()` is JCS over the signed members, and
+  `Envelope.encode("json" | "cbor")` writes the reply, byte strings as unpadded base64url in JSON
+  and as CBOR byte strings in core deterministic CBOR (a new encoder beside the profile's CBOR
+  decoder). -00 fixes no envelope members (§4.1), so until now a Python responder had no artifact
+  response to send. Tests compare it byte for byte with the generator of
+  `vectors/interop-profile-v0/`, and `scripts/evidence-request-interlock.sh` gains a step where
+  Python and Go build identical envelopes in both bindings and Go verifies Python's. Rust signs a
+  different envelope (#270) and is not in that step.
+  `sign_envelope` refuses, before signing, any envelope the profile does not allow: a subject or
+  derivation no request could carry, an empty artifact, or an `issued_at` or time `freshness`
+  outside the §5.2 form.
+- Python: the interop profile's time check no longer accepts seconds above 60
+  (`2026-10-15T00:00:99Z`); it used to clamp them to 59.
+
 ## 0.8.0 — 2026-10-15
 
 - Evidence Request (`draft-mih-agent-evidence-request-00`): every implementation now lives in
