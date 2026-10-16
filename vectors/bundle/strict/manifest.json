@@ -1,0 +1,10 @@
+{
+  "format_version": "1",
+  "files": {
+    "vectors.json": {
+      "sha256": "a9f086d06dcd239089d06cb098372a28d41cd39968a1e0d3ec1d75e9c36eb98c"
+    }
+  },
+  "case_count": 56,
+  "record_signature_count": 9
+}

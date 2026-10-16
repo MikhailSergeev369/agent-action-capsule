@@ -176,9 +176,81 @@ def verify_producer_envelope(capsule_id: str, data: bytes) -> VerificationResult
 
 
 __all__ = [
+    "AUTHORED",
+    "INVALID",
+    "UNCLAIMED",
     "CONTENT_TYPE",
     "COSE_ALGORITHM_EDDSA",
     "Finding",
     "VerificationResult",
     "verify_producer_envelope",
+    "verify_record_signature",
 ]
+
+
+# -- a record's producer signature ---------------------------------------------
+
+AUTHORED = "authored"
+UNCLAIMED = "unclaimed"
+INVALID = "invalid"
+
+
+
+def _record_capsule_id(record: dict) -> str:
+    """The Capsule ID ``record`` declares by its ``canonicalization_id``.
+
+    ``jcs`` (format 4) commits every member but ``capsule_id`` and the
+    local-only envelope fields. ``jcs-n``, declared or implied by a record
+    without the slot (or with JSON ``null``), is the vintage reading, which also
+    drops ``chain`` and removes null and empty members before JCS. Any other
+    algorithm raises ``ValueError``.
+    """
+    import hashlib
+
+    from .canonical import LOCAL_ONLY_FIELDS, jcs, normalize
+
+    declared = record.get("canonicalization_id")
+    algorithm = "jcs-n" if declared is None else declared
+    canonical = {k: v for k, v in record.items() if k != "capsule_id" and k not in LOCAL_ONLY_FIELDS}
+    if algorithm == "jcs-n":
+        canonical.pop("chain", None)
+        return hashlib.sha256(jcs(normalize(canonical))).hexdigest()
+    if algorithm == "jcs":
+        return hashlib.sha256(jcs(canonical)).hexdigest()
+    raise ValueError(f"cannot compute capsule_id with canonicalization_id {algorithm!r}")
+
+
+def verify_record_signature(record: object) -> tuple[str, list[str]]:
+    """Grade a record's producer signature: ``authored``, ``unclaimed`` or ``invalid``.
+
+    ``record["signature"]`` is the hex producer envelope and
+    ``record["key_id"]`` the hex raw Ed25519 public key. Neither present is
+    ``unclaimed`` (an unsigned record, not a forgery); one without the other,
+    or an envelope that does not verify over the Capsule ID recomputed from the
+    record's own content (``jcs`` or vintage ``jcs-n``) under ``key_id``, is
+    ``invalid``. The carried ``capsule_id`` is not read. Returns ``(verdict,
+    messages)``; ``messages`` is empty unless ``invalid``. Never raises.
+    """
+    if not isinstance(record, dict):
+        return INVALID, ["not a mapping"]
+    cid = record.get("capsule_id", "<none>")
+    has_signature, has_key_id = "signature" in record, "key_id" in record
+    if not has_signature and not has_key_id:
+        return UNCLAIMED, []
+    if has_signature != has_key_id:
+        return INVALID, [f"capsule_id={cid}: only one of signature/key_id present -- malformed producer envelope"]
+    try:
+        for member in ("signature", "key_id"):
+            # bytes.fromhex would also take whitespace; every port reads hex digits only.
+            if not isinstance(record[member], str) or not re.fullmatch(r"(?:[0-9a-fA-F]{2})+", record[member]):
+                raise ValueError(f"{member} is not hex")
+        result = verify_producer_envelope(_record_capsule_id(record), bytes.fromhex(record["signature"]))
+        ok = result.ok and result.public_key == bytes.fromhex(record["key_id"])
+    except (KeyError, ValueError, TypeError, RecursionError) as exc:
+        return INVALID, [f"capsule_id={cid}: producer envelope malformed: {type(exc).__name__}: {exc}"]
+    if ok:
+        return AUTHORED, []
+    return INVALID, [
+        f"capsule_id={cid}: self-attested Ed25519 signature does not verify against key_id -- "
+        "content, signature, or key_id was tampered or forged"
+    ]
