@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Breaking**, Go: the `go/emitter` package is removed. It moved unchanged to capsule-viewer
+  (`github.com/action-state-group/capsule-viewer/go/emitter`, from `go/v0.1.0`), which renders
+  the page and keeps the Go/TypeScript byte-parity goldens (#281). Its presentation-fragment
+  decoder and wording-pack check went with it, so Go has no twin of `presentation-fragment.ts`
+  any more. `go/presentation` and the Evidence Bundle fragment codec (`bundle.EncodeFragment`,
+  `bundle.DecodeFragment`, now checked against the shared fragment vectors in `go/bundle`) stay.
+- **Breaking**, TypeScript: `emitter.ts` and `presentation-builder.ts` are removed, along with
+  their root-entry exports (`emitEvidenceGraphHtml`, `emitStaticEvidenceGraphHtml`,
+  `escapeJsonForHtmlScript`, `cspHashSourceFromHex`, `buildPresentation`, `availablePackagings`,
+  `offlineHtmlFromFragment`, `buildFragmentViewerHtml`, `checkWordingPack`, the
+  `PresentationBuildError` family and their constants and types) and `dist/emitter-shell.html`.
+  They moved to `@action-state-group/capsule-viewer` 0.1.0, which imports AAC by package name
+  (#281). The presentation contract,
+  `presentation-fragment.ts`, `presentation-mount.ts`, the registry and the browser IIFE stay.
 - Settlement, all four languages: a `fee_asset_differs` finding names the leg or legs whose fee is
   in another asset than its amount: the payer-observed leg for `routing_fee`, the payee-observed
   leg for `receive_fee`, payer first. It always named the payee leg, so a consumer had to repeat

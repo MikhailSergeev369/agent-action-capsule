@@ -11,7 +11,6 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { chromium, type Browser } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { emitEvidenceGraphHtml } from "../src/emitter.js";
 import {
   CHECKPOINT_NOT_CHECKED_NOTE,
   VERIFICATION_CHECK_WORDS,
@@ -20,8 +19,9 @@ import { sealEvidenceBundle } from "./helpers/sealed-bundle.js";
 
 // The browser build has no checkpoint authenticator, so a signed checkpoint
 // is recorded as checkpoint_unverified there: this is the runtime in which
-// the not-checked list matters most. A real browser, found as
-// emitter-csp-browser.test.ts finds one; skipped when none is installed.
+// the not-checked list matters most. A real browser, skipped when none is
+// installed. The page is the minimum the runtime needs (the bundle, the
+// browser IIFE and a bootstrap); capsule-viewer's emitter builds the full one.
 function browserPath(): string | undefined {
   return [
     process.env.AAC_CHROMIUM_PATH,
@@ -78,15 +78,19 @@ describe.skipIf(executablePath === undefined)(
         rmSync(directory, { recursive: true, force: true });
     }, 60_000);
 
-    async function open(bundle: unknown, bootstrap?: string): Promise<Lists> {
+    async function open(
+      bundle: unknown,
+      bootstrap = 'renderEvidenceGraph(window.__BUNDLE__, document.getElementById("app"));',
+    ): Promise<Lists> {
       const file = join(directory, `page-${count++}.html`);
+      // "<" escaped so no value can close the script element.
+      const embedded = JSON.stringify(bundle).replace(/</gu, "\\u003c");
       writeFileSync(
         file,
-        emitEvidenceGraphHtml(
-          bundle,
-          runtime,
-          bootstrap === undefined ? {} : { bootstrap },
-        ),
+        `<!doctype html><meta charset="utf-8"><div id="app"></div>` +
+          `<script>window.__BUNDLE__ = ${embedded};</script>` +
+          `<script>${runtime.replace(/<\/script/giu, "<\\/script")}</script>` +
+          `<script>${bootstrap}</script>`,
       );
       const context = await browser.newContext();
       const page = await context.newPage();
