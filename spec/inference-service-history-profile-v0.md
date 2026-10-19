@@ -308,7 +308,12 @@ A record is in a period by the time the node's stream committed it.
 1. **Aligned.** A period count names a period of the policy, by its `from` and `to`, and no other
    interval.
 2. **Closed.** A period is counted only when the anchor's checkpoint time is at or after its end.
-   The period the anchor falls in is never counted.
+   The period the anchor falls in is never counted. A Standard History is answered only at an
+   anchor whose checkpoint time is a period boundary, `epoch` + *k* · `length_s` for an integer
+   *k*; such a checkpoint commits only records of the periods before it. A request naming any other
+   anchor is refused `policy_declined`, the same for every requester. A node serving Standard
+   Histories therefore checkpoints its stream at the boundaries it answers at. The answer keeps the
+   anchor's exact log size (§4.2, §12).
 3. **Non-overlapping.** A counts member lists its periods sorted by `from`, each once.
 4. **Fixed once produced.** A period's cells are fixed when first produced. Every later answer, at
    any later anchor, carries the same cells for that period. A record committed later is never
@@ -343,6 +348,7 @@ Each is reported in the IP §7.1 vocabulary:
 | Property | Check |
 |---|---|
 | `period_alignment` | every period of every counts member is aligned to the policy's epoch, has exactly the policy's length, is closed at the anchor, and starts at or after the end of the period before it; the member names the policy's digest |
+| `period_anchor` | the anchor's checkpoint time is a period boundary (§6.1 item 2) |
 | `period_floor` | no published cell is below the floor, every suppressed cell has no value and the reason `below_floor` or `complementary`, and §6.2 item 3 holds |
 | `period_fixed` | over two or more Histories under one definition held by one verifier, every period they share carries the same cells |
 
@@ -463,6 +469,7 @@ Each is reported in the IP §7.1 vocabulary [SH-11 for the list]:
 | `units` | both | every count's unit is in §5.1 and is a unit its member declares; at the Detailed level each entry's unit is the one its half's role gives |
 | `labels` | both | §7.3 |
 | `period_alignment` | Standard | §6.3 |
+| `period_anchor` | Standard | §6.3 |
 | `period_floor` | Standard | §6.3 |
 
 `period_fixed` (§6.3) is a property of two or more Histories, not of one. The History properties
@@ -478,6 +485,8 @@ The node refuses with a signed refusal [IP §6.3]:
 - a request under a Standard definition naming any subject other than `full_history`, or any
   interval that is not a run of whole closed periods: `policy_declined`, the same for every
   requester (§6.1 item 5);
+- a request under a Standard definition at an anchor whose checkpoint time is not a period
+  boundary: `policy_declined`, the same for every requester (§6.1 item 2);
 - a request under a Detailed definition with any subject other than `full_history`:
   `policy_declined`;
 - a request under a Detailed definition from a requester other than its `recipient`, after
@@ -533,15 +542,18 @@ These formats are fixed for the vectors only and are not registered [SH-12]:
 
 ### 9.1 Standard level
 
-One node served 19, 12 and 11 exchanges on three closed days, over two models it states, and
+One node checkpoints its stream at noon each day and at each midnight it answers at. Answered at
+the checkpoint of midnight on 4 October, it served 19, 12 and 11 exchanges on three closed days, over two models it states, and
 requested 4, 2 and 1. The served-only History counts the served ones, per model and in total; the
 requested ones are in no cell. On the second day one model's 3 is below the floor of 5, so it is
 suppressed, and the other model's cell with it, because the total is published.
 
 ### 9.2 Two anchors
 
-The same definition answered at the next checkpoint, inside the same open day, carries the same
-three closed periods byte for byte.
+The same definition answered at the next boundary, midnight on 5 October, carries the same three
+earlier periods byte for byte, and 4 October now closed. The checkpoint at noon on 4 October lies
+inside the open day: a Standard History is refused there, and one answered there fails
+`period_anchor`.
 
 ### 9.3 Detailed level
 
@@ -560,6 +572,7 @@ different client nonces, and one whose half cites no counterparty half. Each is 
 | `mutant-overlapping-period` | `period_alignment` `FAIL` |
 | `mutant-duplicate-period` | `period_alignment` `FAIL`: one aligned period listed twice |
 | `mutant-open-period` | `period_alignment` `FAIL`: the day the anchor falls in is counted |
+| `mutant-answered-at-open-anchor` | `period_anchor` `FAIL`: answered at the checkpoint of noon on 4 October |
 | `mutant-short-period` | `period_alignment` `FAIL` |
 | `mutant-cell-below-floor` | `period_floor` `FAIL` |
 | `mutant-complementary-not-suppressed` | `period_floor` `FAIL` |
@@ -567,6 +580,7 @@ different client nonces, and one whose half cites no counterparty half. Each is 
 | `mutant-period-changed-across-anchors` | `period_fixed` `FAIL` |
 | `refused-range-interval` | signed refusal `policy_declined` |
 | `refused-range-interval-other-requester` | the same token, for a second requester |
+| `refused-open-period-anchor` | signed refusal `policy_declined`: asked at the checkpoint of noon on 4 October |
 | `refused-detailed-other-requester` | signed refusal `policy_declined` |
 | `detailed-peer-confirmed` | accepted; one exchange `peer_confirmed` with `issuer_independence` `NOT_CHECKED`, four `self_reported` (one-sided, redundant, two not joinable) |
 | `mutant-labelled-corroborated` | `labels` `FAIL`: two keys, no evidence about their controllers |
@@ -620,9 +634,11 @@ the same octets whatever the requester, nonce or carriage [ER §5]; each envelop
   nothing.
 - **Differencing.** Aligned, closed, non-overlapping, fixed periods, one policy per node and the
   per-cell floor with complementary suppression stop two period counts being subtracted to isolate
-  one exchange. They do not cover the history card: every checkpoint's log size is exact, at
-  unaligned times, with no floor, so two answers at two anchors show how many records the stream
-  gained between them, even inside an open period. A requester who already knows all but one
+  one exchange. They do not cover the history card: every checkpoint's log size is exact, with no
+  floor. Answering only at period boundaries (§6.1 item 2) stops an answer showing the stream's
+  size inside a period that is still open. It delays, and does not remove, the card's disclosure:
+  a later answer's card carries every earlier checkpoint, including those inside a period, each
+  with its exact log size. A requester who already knows all but one
   exchange of a cell can still learn the last; the floor limits, and does not remove, what such a
   requester learns.
 - **Self-reported counts.** Every count is the node's statement over its own stream. The History
@@ -647,9 +663,9 @@ the same octets whatever the requester, nonce or carriage [ER §5]; each envelop
 | SH-2 | The definition frame (§4.1), which IP leaves open as P-14. If IP fixes common member names, a later version adopts them. |
 | SH-3 | A Standard declaration split between the definition (`kind`, `rule`) and the artifact (`interval`, `live_set`), because one Standard definition is answered at every anchor (§4.2). |
 | SH-4 | `coverage_declaration_population` `NOT_CHECKED` for counts, which carry no records (§4.2). IP §7.1 could also be read to give `NOT_PRESENT`, which IP §6.7.3 item 4 maps to `INSUFFICIENT`; either way no completeness requirement is `SATISFIED`. A count checkable against records needs a disclosure of the records, or a verification-material kind for counts. Relatedly, ER §3.3 asks that a derivation result come with what the requester needs to check its binding; a count has nothing of the kind in this revision. |
-| SH-5 | The closed list of units (§5.1). |
+| SH-5 | The closed list of units (§5.1). The requirements' roles `conflict` and `unknown` are both counted in `exchanges_unattributed`; a later revision may split them. |
 | SH-6 | The labels and the peer-confirmation join (§7). The join's citation member is ER §3.1.1's, which is not yet in the pinned ER revision. The citation is one-way; a two-way join (the peer's half citing the node's) would let `peer_confirmed` show receipt of the answer. `corroborated` needs evidence of distinct controllers in a form IP does not register (IP P-60). |
-| SH-7 | The period rules (§6.1): time-aligned periods, the refusal token, fixed cells, one policy per node. No profile minimum for `length_s` or `floor` is set. The history card's exact log sizes are outside the period rules (§12). |
+| SH-7 | The period rules (§6.1): time-aligned periods, answers only at period boundaries, the refusal token, fixed cells, one policy per node. No profile minimum for `length_s` or `floor` is set. The history card's exact log sizes are outside the period rules (§12). |
 | SH-8 | Complementary suppression (§6.2 item 3) fixed only for one suppressed cell beside a published total; larger tables of dimensions need a fuller rule. |
 | SH-9 | The Detailed level declares `holder_selected`. A Detailed History complete relative to the node's exchanges with the recipient needs the records in a form whose population can be checked. |
 | SH-10 | Referee verdict eligibility (§5.3): the form of the referee's selection statement is not fixed here. |

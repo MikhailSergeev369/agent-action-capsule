@@ -84,7 +84,7 @@ UNITS = ["exchanges_served", "exchanges_requested", "exchanges_unattributed", "c
 LABELS = ["self_reported", "peer_confirmed", "corroborated"]
 
 STANDARD_PROPS = ["definition_form", "definition_binding", "artifact_form", "history_card_content", "units",
-                  "labels", "period_alignment", "period_floor"]
+                  "labels", "period_alignment", "period_anchor", "period_floor"]
 DETAILED_PROPS = ["definition_form", "definition_binding", "artifact_form", "history_card_content", "units",
                   "labels"]
 
@@ -106,7 +106,7 @@ CONTRACT = {
 CONTRACT_REF = f"{CONTRACT['id']}@{CONTRACT['version']}"
 CONTRACT_DIGEST = json_digest(CONTRACT)
 REQUIREMENT = "r-service"
-EVAL = "2026-10-05T00:00:00Z"
+EVAL = "2026-10-05T06:00:00Z"
 
 
 def signed(body: dict, key: str) -> dict:
@@ -121,13 +121,16 @@ def carried(value: dict) -> dict:
 # The node's stream: checkpoints and the history card (§4.2; vector-only shape, §9.4)
 # ---------------------------------------------------------------------------
 
-# (time, log size, witness signing a receipt or None) per checkpoint.
+# (time, log size, witness signing a receipt or None) per checkpoint. Checkpoints 3 and 5 are at
+# period boundaries, so a Standard History answers there (§6.1 item 2); checkpoint 4 is inside the
+# open 4 October.
 CHECKPOINTS = [
     ("2026-10-01T12:00:00Z", 10, None),
     ("2026-10-02T12:00:00Z", 25, "witness"),
     ("2026-10-03T12:00:00Z", 38, "witness"),
-    ("2026-10-04T06:00:00Z", 52, "other-witness"),
+    ("2026-10-04T00:00:00Z", 52, "other-witness"),
     ("2026-10-04T12:00:00Z", 60, None),
+    ("2026-10-05T00:00:00Z", 67, None),
 ]
 
 
@@ -150,7 +153,8 @@ def card(last: int) -> dict:
 
 
 ANCHOR_N = card(3)["anchor"]
-ANCHOR_N1 = card(4)["anchor"]
+ANCHOR_OPEN = card(4)["anchor"]
+ANCHOR_N1 = card(5)["anchor"]
 
 # ---------------------------------------------------------------------------
 # Definitions (§4.1, §4.4)
@@ -208,6 +212,8 @@ DAY = ["2026-10-01T00:00:00Z", "2026-10-02T00:00:00Z", "2026-10-03T00:00:00Z", "
 # The node's served exchanges per closed period and per model it states, as its log holds them.
 # Its requested exchanges (4, 2 and 1) are in the log and in no cell: the counts are served-only.
 SERVED = [{"model-a": 12, "model-b": 7}, {"model-a": 9, "model-b": 3}, {"model-a": 6, "model-b": 5}]
+# 4 October, closed at the next boundary.
+SERVED_4 = {"model-a": 8, "model-b": 6}
 
 
 def cell(value: int | None, dimension: dict | None, *, unit: str = "exchanges_served", label: str = "self_reported",
@@ -389,7 +395,7 @@ def history(definition: dict, nonce: str, art: dict, issued_at: str, *, anchor: 
 
 
 def standard(*, counts: dict | None = None, definition: dict | None = None, last: int = 3,
-             anchor: str = ANCHOR_N, nonce: str = "requester-1/standard", at: str = "2026-10-04T06:00:05Z") -> dict:
+             anchor: str = ANCHOR_N, nonce: str = "requester-1/standard", at: str = "2026-10-04T00:00:05Z") -> dict:
     d = definition or standard_definition()
     return history(d, nonce, artifact(d, anchor, last, {"period_counts": counts or period_counts()}), at,
                    anchor=anchor)
@@ -448,12 +454,19 @@ def cases() -> list[dict]:
         standard(counts=duplicate), props(STANDARD_PROPS, period_alignment="FAIL"), standard_coverage(),
         ["period_alignment"]))
 
-    open_ = period_counts([*SERVED, {"model-a": 8, "model-b": 6}])
+    open_ = period_counts([*SERVED, SERVED_4])
     out.append(history_case(
         "mutant-open-period", "The period the anchor falls in, counted before it is closed",
         ["§6.1", "§6.3", "§9.1"], "constructed: the served-only History with 4 October counted at an anchor of "
-        "4 October 06:00", standard(counts=open_), props(STANDARD_PROPS, period_alignment="FAIL"),
+        "4 October 00:00", standard(counts=open_), props(STANDARD_PROPS, period_alignment="FAIL"),
         standard_coverage(), ["period_alignment"]))
+
+    out.append(history_case(
+        "mutant-answered-at-open-anchor", "A Standard History answered at an anchor inside an open period",
+        ["§6.1", "§6.3", "§9.1", "§12"], "constructed: the served-only History answered at the checkpoint of "
+        "4 October 12:00, inside the open 4 October",
+        standard(last=4, anchor=ANCHOR_OPEN, nonce="requester-1/standard-open", at="2026-10-04T12:00:05Z"),
+        props(STANDARD_PROPS, period_anchor="FAIL"), standard_coverage(), ["period_anchor"], last=4))
 
     short = period_counts()
     short["periods"][2]["to"] = "2026-10-03T12:00:00Z"
@@ -481,11 +494,12 @@ def cases() -> list[dict]:
 
     # --- Two anchors: each closed period's bytes are fixed once produced (§6.1) -------------------
     first = standard()
-    later = standard(last=4, anchor=ANCHOR_N1, nonce="requester-1/standard-later", at="2026-10-04T12:00:05Z")
-    changed = copy.deepcopy(SERVED)
+    later = standard(counts=period_counts([*SERVED, SERVED_4]), last=5, anchor=ANCHOR_N1,
+                     nonce="requester-1/standard-later", at="2026-10-05T00:00:05Z")
+    changed = copy.deepcopy([*SERVED, SERVED_4])
     changed[2]["model-a"] += 1
-    moved = standard(counts=period_counts(changed), last=4, anchor=ANCHOR_N1, nonce="requester-1/standard-later",
-                     at="2026-10-04T12:00:05Z")
+    moved = standard(counts=period_counts(changed), last=5, anchor=ANCHOR_N1, nonce="requester-1/standard-later",
+                     at="2026-10-05T00:00:05Z")
 
     def pair_case(cid: str, title: str, source: str, histories: list[dict], status: str, fails: list[str]) -> dict:
         return {"id": cid, "title": title, "cites": ["§6.1", "§6.3", "§9.2"], "source": source, "kind": "pair",
@@ -494,8 +508,9 @@ def cases() -> list[dict]:
                              "period_fixed": status, "accepted": not fails, "fails": fails}}
 
     out.append(pair_case(
-        "periods-fixed-across-anchors", "The same History at two anchors in one open period: identical closed periods",
-        "constructed: the served-only History, and the same definition answered at the next checkpoint",
+        "periods-fixed-across-anchors", "The same History at two period boundaries: identical earlier periods",
+        "constructed: the served-only History, and the same definition answered at the next boundary, with "
+        "4 October added",
         [first, later], "PASS", []))
     out.append(pair_case(
         "mutant-period-changed-across-anchors", "A closed period's count changed at the later anchor",
@@ -507,7 +522,7 @@ def cases() -> list[dict]:
     for i, (cid, nonce) in enumerate((("refused-range-interval", "requester-1/range"),
                                       ("refused-range-interval-other-requester", "requester-2/range"))):
         req = request(json_digest(d), nonce, subject={"range": [10, 37]})
-        rep = refusal(req, "policy_declined", f"2026-10-04T06:00:1{i}Z")
+        rep = refusal(req, "policy_declined", f"2026-10-04T00:00:1{i}Z")
         out.append({"id": cid, "title": "A Standard History asked over records 10 to 37, which is no run of whole periods",
                     "cites": ["§6.1", "§8.4", "IP §6.3"], "source": "constructed", "kind": "refusal",
                     "pins": pins(), "inputs": {"definition": d, "request": req, "reply": rep},
@@ -515,9 +530,18 @@ def cases() -> list[dict]:
                                  "requirements": {REQUIREMENT: mapped("refusal-withheld")},
                                  "claim": {"evidence": [ref(shx(rep["octets_text"].encode()))], "proofs": []}}})
 
+    req = request(json_digest(d), "requester-1/open-anchor", anchor=ANCHOR_OPEN)
+    rep = refusal(req, "policy_declined", "2026-10-04T12:00:15Z")
+    out.append({"id": "refused-open-period-anchor", "title": "A Standard History asked at an anchor inside an open period",
+                "cites": ["§6.1", "§8.4", "IP §6.3"], "source": "constructed", "kind": "refusal",
+                "pins": pins(), "inputs": {"definition": d, "request": req, "reply": rep},
+                "expected": {"message_type": "refusal", "reason": "policy_declined", "properties": ref_props(),
+                             "requirements": {REQUIREMENT: mapped("refusal-withheld")},
+                             "claim": {"evidence": [ref(shx(rep["octets_text"].encode()))], "proofs": []}}})
+
     dd = detailed_definition()
     req = request(json_digest(dd), "requester-3/detailed")
-    rep = refusal(req, "policy_declined", "2026-10-04T06:00:20Z")
+    rep = refusal(req, "policy_declined", "2026-10-04T00:00:20Z")
     out.append({"id": "refused-detailed-other-requester", "title": "A Detailed History asked by a requester it does not name",
                 "cites": ["§4.4", "§8.4", "IP §6.5 item 4"], "source": "constructed", "kind": "refusal",
                 "pins": pins(), "inputs": {"definition": dd, "request": req, "reply": rep},
@@ -539,7 +563,7 @@ def cases() -> list[dict]:
             entry("x-5", node_half("x-5", "2026-10-03T11:00:01Z", None), p5, labels[4]),
         ]
         h = history(dd, "recipient/detailed", artifact(dd, ANCHOR_N, 3, {"exchanges": entries}),
-                    "2026-10-04T06:00:30Z")
+                    "2026-10-04T00:00:30Z")
         return h, entries
 
     honest = ["peer_confirmed", "self_reported", "self_reported", "self_reported", "self_reported"]

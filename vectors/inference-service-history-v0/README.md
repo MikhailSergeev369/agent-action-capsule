@@ -4,12 +4,13 @@ These vectors exercise `spec/inference-service-history-profile-v0.md` (cited as 
 `spec/interop-profile-v0.md` (`evidence-interop/0`, cited as IP). They cover:
 
 - a served-only Standard History, with requested exchanges counted in no cell;
-- the period rules: overlapping, duplicated, open and short periods, a cell below the floor, a missing
-  complementary suppression, and a closed period changed between two anchors;
+- the period rules: overlapping, duplicated, open and short periods, an answer at an anchor inside
+  an open period, a cell below the floor, a missing complementary suppression, and a closed period
+  changed between two anchors;
 - peer confirmation at the Detailed level, and labels: `self_reported`, `peer_confirmed`, and
   `corroborated`, which no case derives;
 - refusals: an interval that is not a run of whole periods (`policy_declined`, the same for two
-  requesters), and a Detailed History asked by a requester it does not name (`policy_declined`, so
+  requesters), an anchor that is not a period boundary (`policy_declined`), and a Detailed History asked by a requester it does not name (`policy_declined`, so
   the refusal does not show that the node holds a Detailed History for anyone).
 
 Every case cites the sections its expected values come from. The profile's §9.4 lists every case.

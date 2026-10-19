@@ -302,6 +302,13 @@ def periods_ok(d: dict, env: dict) -> bool:
     return True
 
 
+def anchor_ok(d: dict, env: dict) -> bool:
+    """§6.1 item 2: the anchor's checkpoint time is a period boundary."""
+    p = d["period_policy"]
+    anchor_time = when(env["artifact"]["history_card"]["history"][-1]["checkpoint"]["timestamp"])
+    return not (anchor_time - when(p["epoch"])) % timedelta(seconds=p["length_s"])
+
+
 def floor_ok(d: dict, env: dict) -> bool:
     """§6.2: a published cell is at least the floor; a suppressed cell has no value; a unit's total and
     all but one of its cells never stand published beside one suppressed cell."""
@@ -359,6 +366,7 @@ def history_properties(case: dict, d: dict, env: dict, derive_fn: Derive = deriv
     props["labels"] = "PASS" if labels_ok(case, env, derive_fn) else "FAIL"
     if d["level"] == "standard":
         props["period_alignment"] = "PASS" if periods_ok(d, env) else "FAIL"
+        props["period_anchor"] = "PASS" if anchor_ok(d, env) else "FAIL"
         props["period_floor"] = "PASS" if floor_ok(d, env) else "FAIL"
     return props
 
@@ -418,8 +426,8 @@ def failing(result: dict) -> set:
 
 
 def test_corpus_shape_and_pins():
-    assert DATA["count"] == len(CASES) == 21
-    assert (len(HISTORY_CASES), len(PAIR_CASES), len(REFUSAL_CASES)) == (16, 2, 3)
+    assert DATA["count"] == len(CASES) == 23
+    assert (len(HISTORY_CASES), len(PAIR_CASES), len(REFUSAL_CASES)) == (17, 2, 4)
     assert sha(DATA["contract"]["document_jcs"].encode()) == DATA["contract"]["contract_digest"]
     assert digest(DATA["period_policy"]["document"]) == DATA["period_policy"]["digest"]
     assert set(DATA["units"]) == UNITS and DATA["labels"] == list(RANK)
@@ -542,6 +550,7 @@ DEFECTIVE: dict[str, Evaluator] = {
     "units not checked": _without("units"),
     "labels not checked": _without("labels"),
     "alignment not checked": _without("period_alignment"),
+    "anchor not checked": _without("period_anchor"),
     "floor not checked": _without("period_floor"),
     "floor without complementary suppression": _no_complement,
     "periods checked alone": _overlap_allowed,
