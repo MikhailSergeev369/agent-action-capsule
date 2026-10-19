@@ -62,8 +62,24 @@ holder's own statement and is never checked by this profile.
 
 - Every envelope of one History MUST name the same `responder` [PA-1]. A History over records
   signed under two keys, including one holder's keys before and after a rotation, is two Histories.
-- Every deal of one History MUST be served from one evidence stream, at one coverage anchor
-  (§4.3, §6.2).
+- One History MAY span several evidence streams held under the holder key, for example one stream
+  per deal. Every record of one deal MUST be held in one stream. Each envelope answers one deal
+  from that stream, and its artifact names the stream (§4.3) [PA-14].
+- Every envelope of one History MUST be answered at one coverage anchor: every request names it
+  in `expected_pin`, and every envelope in `anchor.digest` (§4.3, §6.2) [PA-14]. Where every
+  selected deal is held in one stream, the anchor MAY be a checkpoint of that stream. Where the
+  deals are held in two or more streams, it MUST be a **witnessed checkpoint tick**: one
+  checkpoint of the holder's, countersigned by a witness, that commits to the checkpoint of each
+  of those streams at that tick. Its digest is taken as for any checkpoint [IP §6.2.1], so a
+  witness's countersignature does not change it. A deal's records "at the anchor" (§4.3) are then
+  those its stream holds at the checkpoint the tick commits to.
+- At the Basic level a verifier checks only that every envelope names the same anchor (§6.2
+  `single_anchor`). It does not check that the anchor is witnessed, or that it commits to the
+  stream an artifact names: like `anchor_inclusion` (§6.1), that needs verification material IP
+  does not register (PA-13, PA-14). Both are among the checks a verifier shows as not run
+  (§6.3 item 4).
+- One anchor over several streams says nothing about which of their records a History includes.
+  That is a coverage declaration, which this level does not make (`completeness` `not_asserted`).
 - The holder key answering is not evidence that the key's holder made the deals. The records'
   own signatures sit outside what the Basic level reveals (§9).
 
@@ -239,8 +255,8 @@ Each is reported in the IP §7.1 vocabulary [PA-10]:
 | `definition_binding` | every envelope's `derivation` equals SHA-256 of UTF-8 of JCS of the definition the recipient holds |
 | `selection_coverage` | every envelope's `subject` is `{"correlation": r}` with `r` in `selection`, and every member of `selection` is answered by exactly one envelope |
 | `single_signer` | every envelope names the same `responder` |
-| `single_anchor` | every envelope carries the same `anchor` |
-| `artifact_form` | every artifact is the §4.3 object: exactly its five members, `anchor`, `derivation` and `subject` equal to the envelope's, `records` non-empty, each entry carrying `digest` and `leaf_index` and no member outside `reads`; one `evidence_stream` across the History |
+| `single_anchor` | every envelope carries the same `anchor`, whether or not the envelopes name the same stream. Whether that anchor is a checkpoint or a witnessed checkpoint tick is not checked (§2, PA-14) |
+| `artifact_form` | every artifact is the §4.3 object: exactly its five members, `anchor`, `derivation` and `subject` equal to the envelope's, `records` non-empty, each entry carrying `digest` and `leaf_index` and no member outside `reads`; checked per envelope, `evidence_stream` a non-empty text string. Two envelopes may name different streams. Whether the named stream holds the records is not checked (§2, PA-14) |
 | `record_kinds` | every record's `record_type` is in §3's list |
 
 The History properties are checked only over envelopes accepted under §6.1. A History property
@@ -360,3 +376,4 @@ checked. Everything else in §6 is the same.
 | PA-11 | Publishing the §6.4 run as conformance vectors beside IP §11.5. |
 | PA-12 | The one-file History container (§8.2). |
 | PA-13 | Record-level inclusion for a derivation's artifact: needs an IP verification-material kind (IP P-13); until then `anchor_inclusion` is `NOT_CHECKED`. |
+| PA-14 | A History over several streams at one witnessed checkpoint tick (§2). Showing that the tick is witnessed and commits to each stream an artifact names needs verification material from the tick to the stream's checkpoint, which IP does not register (IP P-13); until then a verifier checks only that every envelope names the same anchor. |

@@ -15,6 +15,17 @@
   payment token are unsigned, and the order webhook's HMAC is under a secret the two parties share.
   So the native check is `NOT_PRESENT` or `NOT_CHECKED`, mapped as interop profile §8.1 rows 3-4,
   and the declaration names what ACP would need to add. No vectors, by design.
+- Personal-Agent History Profile v0 (`spec/personal-agent-history-profile-v0.md`): one History
+  may span several evidence streams under one holder key, for example one stream per deal, all
+  answered at one coverage anchor. Over two or more streams that anchor is a witnessed checkpoint
+  tick that commits to each stream's checkpoint (§2, new open point PA-14). In §6.2,
+  `single_anchor` now reads as one checkpoint or one witnessed tick, and `artifact_form` checks
+  `evidence_stream` per envelope instead of requiring one stream across the History. A History
+  over one stream at one checkpoint is accepted as before. Two derived cases are added to
+  `vectors/personal-history-basic-v0/`: `multi-stream-one-tick` (accepted) and
+  `mutant-multi-stream-mixed-anchor` (fails `single_anchor`). The existing twelve cases are
+  unchanged. Changed released files: `vectors/personal-history-basic-v0/vectors.json`,
+  `manifest.json`, `README.md` and `SHA256SUMS`, and `vectors/SHA256SUMS`.
 
 ## 0.10.0 — 2026-10-17
 

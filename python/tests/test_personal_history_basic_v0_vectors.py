@@ -15,6 +15,7 @@ of which must disagree with at least one case.
 from __future__ import annotations
 
 import ast
+import base64
 import copy
 import hashlib
 import json
@@ -133,7 +134,7 @@ def definition_form(d: Any) -> bool:
 
 
 def artifact_form(envs: list[dict], reads: set) -> bool:
-    streams = set()
+    """Checked per envelope: each artifact names its own stream, and envelopes may name different ones (§2)."""
     for env in envs:
         a = env["artifact"]
         if not isinstance(a, dict) or set(a) != ARTIFACT_MEMBERS:
@@ -148,8 +149,9 @@ def artifact_form(envs: list[dict], reads: set) -> bool:
             if not isinstance(r, dict) or not {"digest", "leaf_index"} <= set(r) \
                     or not set(r) <= {"digest", "leaf_index"} | reads:
                 return False
-        streams.add(jcs(a["evidence_stream"]))
-    return len(streams) <= 1
+        if not isinstance(a["evidence_stream"], str) or not a["evidence_stream"]:
+            return False
+    return True
 
 
 def history_properties(definition: Any, envs: list[dict]) -> dict:
@@ -219,8 +221,8 @@ def failing(result: dict) -> set:
 
 
 def test_corpus_shape_and_pins():
-    assert DATA["count"] == len(CASES) == 12
-    assert len(HISTORY_CASES) == 11
+    assert DATA["count"] == len(CASES) == 14
+    assert len(HISTORY_CASES) == 13
     assert sha(DATA["contract"]["document_jcs"].encode()) == DATA["contract"]["contract_digest"]
     assert DATA["contract"]["document_jcs"].encode() == jcs(CONTRACT)
     responder = DATA["responder"]
@@ -344,7 +346,33 @@ DEFECTIVE: dict[str, Evaluator] = {
     "artifact_form allows any member": _replace(
         "artifact_form", lambda d, e: all(isinstance(x["artifact"], dict) for x in e)),
     "record_kinds allows any kind": _replace("record_kinds", lambda d, e: True),
+    "artifact_form requires one stream across the History": _replace(
+        "artifact_form", lambda d, e: artifact_form(e, set(d["reads"]))
+        and len({x["artifact"]["evidence_stream"] for x in e}) <= 1),
+    "single_anchor compared within each stream only": _replace(
+        "single_anchor", lambda d, e: all(len({jcs(x["anchor"]) for x in e if x["artifact"]["evidence_stream"] == s}) == 1
+                                          for s in {x["artifact"]["evidence_stream"] for x in e})),
 }
+
+
+def test_multi_stream_history_spans_streams_at_one_anchor():
+    """§2: the positive names a different stream per deal, one holder key and one anchor that is
+    no checkpoint of the run's one stream; the mixed-anchor mutant keeps the positive's definition
+    and two of its exchanges byte for byte, and answers the third at another anchor."""
+    by_id = {c["id"]: c for c in CASES}
+    envs = [json.loads(x["reply"]["octets_text"]) for x in by_id["multi-stream-one-tick"]["inputs"]["exchanges"]]
+    arts = [json.loads(base64.urlsafe_b64decode(e["artifact"] + "=" * (-len(e["artifact"]) % 4))) for e in envs]
+    assert len({a["evidence_stream"] for a in arts}) == len(envs) == 3
+    assert len({e["responder"] for e in envs}) == 1
+    (tick,) = {e["anchor"]["digest"] for e in envs}
+    assert tick not in {cp["expected_pin"] for cp in DATA["holder_stream"]["checkpoints"]}
+    positive, mutant = by_id["multi-stream-one-tick"]["inputs"], by_id["mutant-multi-stream-mixed-anchor"]["inputs"]
+    assert mutant["definition"] == positive["definition"]
+    assert len(mutant["exchanges"]) == len(positive["exchanges"])
+    kept = [x == y for x, y in zip(mutant["exchanges"], positive["exchanges"])]
+    assert kept.count(False) == 1
+    moved = json.loads(mutant["exchanges"][kept.index(False)]["reply"]["octets_text"])
+    assert moved["anchor"]["digest"] != tick
 
 
 def test_every_defective_evaluator_is_caught():
