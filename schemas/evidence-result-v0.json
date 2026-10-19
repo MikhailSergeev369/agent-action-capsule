@@ -111,7 +111,7 @@
       ]
     },
     "ClaimType": {
-      "description": "PROPOSED discriminator, encoding the 2026-09-25 ruling: 'close + reconcile as claim types in result v0, so they feed the same result.' Absent means `requirement` -- the pre-existing one-requirement-evaluated-once claim (spec section 1) -- so every Result that validated before this field existed validates unchanged. Closed-world: a value outside this enum fails validation here. A viewer that meets a type it does not recognize MUST render the row labelled 'unrecognized' with the raw type and the claim's contract_ref, never drop it (ruled 2026-09-25); that behaviour and its fixture are owned by capsule-viewer, not by this schema.",
+      "description": "Discriminator (spec section 4.1): `requirement` and `reconcile` are normative, `close` is PROPOSED. Encodes the 2026-09-25 ruling: 'close + reconcile as claim types in result v0, so they feed the same result.' Absent means `requirement` -- the pre-existing one-requirement-evaluated-once claim (spec section 1) -- so every Result that validated before this field existed validates unchanged. Closed-world: a value outside this enum fails validation here. A viewer that meets a type it does not recognize MUST render the row labelled 'unrecognized' with the raw type and the claim's contract_ref, never drop it (ruled 2026-09-25); that behaviour and its fixture are owned by capsule-viewer, not by this schema.",
       "enum": ["requirement", "reconcile", "close"]
     },
     "Period": {
@@ -125,7 +125,7 @@
       }
     },
     "ReconcileState": {
-      "description": "The six reconcile states over one join key between two books (evidencebook-skills-design 2026-09-25, section 4). A = this Result's own book; B = the peer named by ReconcileClaim.peer. MATCHED: present on both sides, equal. A_ONLY: this book has the row, the peer does not. B_ONLY: the peer has the row, this book does not. CONFLICTING: present on both sides, values differ. INSUFFICIENT: the evidence needed to compare was missing (e.g. a connector gap). UNRESOLVED: compared but not resolvable to any other state within the period. Ruled 2026-09-25: 'one side missing isn't a finding; both sides disagreeing is' -- A_ONLY and B_ONLY MUST never render like CONFLICTING.",
+      "description": "The six reconcile states over one join key between two books (spec/evidence-result-v0.md section 4.1). A = this Result's own book; B = the peer named by ReconcileClaim.peer. MATCHED: present on both sides, equal. A_ONLY: this book has the row, the peer does not. B_ONLY: the peer has the row, this book does not. CONFLICTING: present on both sides, values differ. INSUFFICIENT: the evidence needed to compare was missing (e.g. a connector gap). UNRESOLVED: compared but not resolvable to any other state within the period. Ruled 2026-09-25: 'one side missing isn't a finding; both sides disagreeing is' -- A_ONLY and B_ONLY MUST never render like CONFLICTING.",
       "enum": ["MATCHED", "A_ONLY", "B_ONLY", "CONFLICTING", "INSUFFICIENT", "UNRESOLVED"]
     },
     "ReconcileTallies": {
