@@ -12,6 +12,7 @@ import {
 import type { CompliancePresentation } from "./compliance-presentation.js";
 import { COMPLIANCE_CSS } from "./compliance-styles.js";
 import { NOT_STATED } from "./outcome-report.js";
+import { BASIS_TEXT, datingStatement, span } from "./outcome-report-view.js";
 import type { ResultRoot } from "./result-root.js";
 
 /**
@@ -296,6 +297,27 @@ function renderSessionDetails(session: Session): HTMLElement {
   const summary = document.createElement("summary");
   summary.textContent = `${session.conversationId} · ${session.day}`;
   details.append(summary);
+  // Which date the session is counted under, verbatim, beside the sealed day:
+  // the outcome card's drill-down line, so a backfilled session never reads
+  // as if it happened on the day it was sealed.
+  const dated = session.dated;
+  if (dated.basis !== "judged") {
+    const line = el(
+      "div",
+      "",
+      `${dated.stated ?? dated.date}${dated.zone === "not-stated" ? " (timezone not stated)" : ""}: ${BASIS_TEXT[dated.basis]}`,
+    );
+    line.dataset.dated = dated.basis;
+    details.append(line);
+    if (dated.importedAt !== undefined) {
+      const imported = el("div", "", `Imported ${dated.importedAt}`);
+      imported.dataset.imported = "";
+      details.append(imported);
+    }
+    const sealed = el("div", "", `Judged and sealed ${session.judgedDay}`);
+    sealed.dataset.sealed = "";
+    details.append(sealed);
+  }
   for (const test of session.tests) details.append(checkItBlock(test));
   details.append(renderTranscript(session));
   return details;
@@ -519,7 +541,22 @@ function renderWhatRan(host: HTMLElement, model: ComplianceModel): void {
         : "disagrees across sessions"),
   );
   field("Sessions", fmt(model.totalSessions));
+  const { dating } = model;
+  if (dating.from !== undefined && dating.to !== undefined) {
+    field("Period", span([dating.from, dating.to]));
+    ran.lastElementChild!.setAttribute("data-period", "");
+  }
+  if (dating.basis !== "judged") {
+    field("Sealed", span(dating.judgedDays));
+    ran.lastElementChild!.setAttribute("data-sealed", "");
+  }
   section.append(ran);
+  const note = datingStatement(dating, model.totalSessions);
+  if (note !== undefined) {
+    const p = el("p", "na", note);
+    p.dataset.dateNote = dating.basis;
+    section.append(p);
+  }
   host.append(section);
 }
 
