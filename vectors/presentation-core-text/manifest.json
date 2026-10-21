@@ -1,0 +1,35 @@
+{
+  "set": "aac-presentation-core-text-v0",
+  "contract": "spec/presentation-contract-v0.md (sections 6.1, 6.2, 7.4)",
+  "provenance": "spec-derived",
+  "authored": "by hand, from the specification text; no generator. bundles.json holds one literal bundle sealed once from a test fixture (see its provenance).",
+  "schema": "schemas/presentation-manifest-v0.json#/$defs/WordingPack",
+  "normative_for": [
+    "ts/src/evidence-graph-view.ts",
+    "ts/src/verification-page.ts"
+  ],
+  "pending": [
+    "checking state golden and slow-hash fixture: left to the viewer's four-state test"
+  ],
+  "files": [
+    {
+      "path": "core-text.json",
+      "sha256": "3544d6b926a28fe9ab1194b4a966d00b680a4a80577df9c06936978adb0121b0"
+    },
+    {
+      "path": "states.json",
+      "sha256": "a3b5c86ea9977504336ed45cbed23fc3f859b0563c5096dec40bc9112ce31379",
+      "count": 4
+    },
+    {
+      "path": "refusals.json",
+      "sha256": "31656e5f450d21ade519612736dee02e8181d9bece81ce3104d576df6a1181e4",
+      "count": 15
+    },
+    {
+      "path": "bundles.json",
+      "sha256": "81eced5bc0868cb76016c71af80ce3c17d2776e536cc79b7d1cd424a74b3ecb9",
+      "count": 1
+    }
+  ]
+}

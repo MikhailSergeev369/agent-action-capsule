@@ -1,0 +1,264 @@
+{
+  "description": "Literal bundles for the state goldens that vectors/bundle does not hold. Each was sealed once from a fixture and is literal from then on: the bytes here are the bundle, and a consumer never re-seals it.",
+  "cases": [
+    {
+      "name": "verified-one-uncheckpointed",
+      "description": "Four records, all valid; three are bound to the checkpoint's range and one (the turn appended after the last checkpoint) has no membership entry. It verifies, and 1 of its 4 records is not covered by the log's checkpoint.",
+      "provenance": "sealed once by ts/test/helpers/sealed-bundle.ts from ts/test/testdata/report-rows-uncheckpointed-bundle.json with act-late outside the checkpoint (deterministic test keys; no clock, no randomness)",
+      "bundle": {
+        "bundle_version": "2",
+        "bundle_kind": "evidence-bundle/v2",
+        "completeness": {
+          "closure_depth": 2,
+          "records_mode": "complete",
+          "payloads_mode": "all",
+          "suppressed_fields": [],
+          "missing": []
+        },
+        "root": "6be2401b0cba32ddbf9d54aa85834049612b9e18f38e367a13413f6d128b6993",
+        "records": [
+          {
+            "spec_version": "draft-mih-scitt-agent-action-capsule-04",
+            "format_version": "4",
+            "canonicalization_id": "jcs",
+            "action_type": "fyi",
+            "operator": "sealed-fixture",
+            "developer": "sealed-fixture@v1",
+            "timestamp": "2026-09-14T00:00:00Z",
+            "assurance": {
+              "effect_mode": "not_applicable",
+              "attestation_mode": "self_attested",
+              "ledger_mode": "standalone"
+            },
+            "action_id": "root",
+            "model_attestation": {
+              "compute_attestation": {
+                "agent_input_digest": "940a171cd7aede0cb4d5f1d043f8717fdfc46abaab702dbb9fb87e9c50a62e82"
+              }
+            },
+            "capsule_id": "6be2401b0cba32ddbf9d54aa85834049612b9e18f38e367a13413f6d128b6993"
+          },
+          {
+            "spec_version": "draft-mih-scitt-agent-action-capsule-04",
+            "format_version": "4",
+            "canonicalization_id": "jcs",
+            "action_type": "fyi",
+            "operator": "sealed-fixture",
+            "developer": "sealed-fixture@v1",
+            "timestamp": "2026-09-14T00:00:00Z",
+            "assurance": {
+              "effect_mode": "not_applicable",
+              "attestation_mode": "self_attested",
+              "ledger_mode": "standalone"
+            },
+            "action_id": "act-live",
+            "model_attestation": {
+              "compute_attestation": {
+                "agent_input_digest": "259a4467ff40071c836bacbfdd246ca813a4e1e43cafc73f47edafcf4e0be8fd"
+              }
+            },
+            "capsule_id": "3a8ea17393b926f8887e97f51e4e27ae1350e6764e58b1f06f6657cfd5a4776b"
+          },
+          {
+            "spec_version": "draft-mih-scitt-agent-action-capsule-04",
+            "format_version": "4",
+            "canonicalization_id": "jcs",
+            "action_type": "fyi",
+            "operator": "sealed-fixture",
+            "developer": "sealed-fixture@v1",
+            "timestamp": "2026-09-14T00:00:00Z",
+            "assurance": {
+              "effect_mode": "not_applicable",
+              "attestation_mode": "self_attested",
+              "ledger_mode": "standalone"
+            },
+            "action_id": "act-backfilled",
+            "provenance_mode": {
+              "mode": "backfilled",
+              "source_ref": {
+                "type": "x-fixture-import",
+                "digest_alg": "SHA-256",
+                "digest": "0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "source_asserted_at": "2026-08-26T05:34:57.860343",
+              "import_batch": "fixture-batch",
+              "imported_at": "2026-09-14T00:00:00Z"
+            },
+            "occurred_at": "2026-08-26T05:34:57.860343",
+            "model_attestation": {
+              "compute_attestation": {
+                "agent_input_digest": "160758267f19e6913e96be16d39bdfdcc703464fc166c89456770c208f648bb5"
+              }
+            },
+            "capsule_id": "203a04a26fa60441aad5bdb70e6c889ef6c4ea71a0e4f08226669fb67a63310f"
+          },
+          {
+            "spec_version": "draft-mih-scitt-agent-action-capsule-04",
+            "format_version": "4",
+            "canonicalization_id": "jcs",
+            "action_type": "fyi",
+            "operator": "sealed-fixture",
+            "developer": "sealed-fixture@v1",
+            "timestamp": "2026-09-14T00:00:00Z",
+            "assurance": {
+              "effect_mode": "not_applicable",
+              "attestation_mode": "self_attested",
+              "ledger_mode": "standalone"
+            },
+            "action_id": "act-late",
+            "model_attestation": {
+              "compute_attestation": {
+                "agent_input_digest": "1610794833cad8b9cf70c3626e3c20d667187a00704665ea033ef29d369cdd40"
+              }
+            },
+            "capsule_id": "6b3af0ec9a2688f95040dbae234bc2c159dc78be73ba5374757b30425d4a648e"
+          }
+        ],
+        "disclosures": {
+          "3a8ea17393b926f8887e97f51e4e27ae1350e6764e58b1f06f6657cfd5a4776b": {
+            "agent_input": {
+              "example": "evidence from a checkpointed turn"
+            }
+          },
+          "203a04a26fa60441aad5bdb70e6c889ef6c4ea71a0e4f08226669fb67a63310f": {
+            "agent_input": {
+              "example": "evidence from a backfilled turn"
+            }
+          },
+          "6b3af0ec9a2688f95040dbae234bc2c159dc78be73ba5374757b30425d4a648e": {
+            "agent_input": {
+              "example": "evidence from a late turn"
+            }
+          },
+          "6be2401b0cba32ddbf9d54aa85834049612b9e18f38e367a13413f6d128b6993": {
+            "agent_input": {
+              "spec_version": "report/v1",
+              "title": "record-grounding-bench — partial checkpoint coverage",
+              "rows": [
+                {
+                  "row_id": "grounded-live",
+                  "label": "grounded turn, checkpointed",
+                  "status": "established",
+                  "references": [
+                    {
+                      "type": "agent-action-capsule",
+                      "citation_purpose": "acted_on",
+                      "digest": "3a8ea17393b926f8887e97f51e4e27ae1350e6764e58b1f06f6657cfd5a4776b"
+                    }
+                  ]
+                },
+                {
+                  "row_id": "grounded-backfilled",
+                  "label": "grounded turn, backfilled and uncheckpointed",
+                  "status": "established",
+                  "references": [
+                    {
+                      "type": "agent-action-capsule",
+                      "citation_purpose": "acted_on",
+                      "digest": "203a04a26fa60441aad5bdb70e6c889ef6c4ea71a0e4f08226669fb67a63310f"
+                    }
+                  ]
+                },
+                {
+                  "row_id": "grounded-late",
+                  "label": "grounded turn after the last checkpoint",
+                  "status": "established",
+                  "references": [
+                    {
+                      "type": "agent-action-capsule",
+                      "citation_purpose": "acted_on",
+                      "digest": "6b3af0ec9a2688f95040dbae234bc2c159dc78be73ba5374757b30425d4a648e"
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "completeness_certificate": {
+          "log_id": "sealed-fixture-log",
+          "range_root": "ebc331665290159ae90b81caea6bc2ea1df060c1613808bf682c3c550299924c",
+          "first_seq": 1,
+          "last_seq": 3,
+          "body_digests": [
+            "6be2401b0cba32ddbf9d54aa85834049612b9e18f38e367a13413f6d128b6993",
+            "3a8ea17393b926f8887e97f51e4e27ae1350e6764e58b1f06f6657cfd5a4776b",
+            "203a04a26fa60441aad5bdb70e6c889ef6c4ea71a0e4f08226669fb67a63310f"
+          ],
+          "range_proof": {
+            "from_seq": 1,
+            "to_seq": 3,
+            "size": 4,
+            "from_index": 0,
+            "to_index": 2,
+            "witness": []
+          },
+          "memberships": {
+            "6be2401b0cba32ddbf9d54aa85834049612b9e18f38e367a13413f6d128b6993": {
+              "log_coordinates": {
+                "log_id": "sealed-fixture-log",
+                "seq": 1,
+                "leaf_index": 0
+              },
+              "inclusion_proof": {
+                "v": 1,
+                "kind": "inclusion",
+                "size": 4,
+                "leaf_index": 0,
+                "witness": [
+                  "9616cf2f527c9d382089c8e4b60f5792df1bd7eea4111e4a030d746f0f560473"
+                ],
+                "peaks_left": [],
+                "peaks_right": [
+                  "f043ae9d81edf40087cab491264ce89311565ff884887906601a9b22c1248039"
+                ]
+              }
+            },
+            "3a8ea17393b926f8887e97f51e4e27ae1350e6764e58b1f06f6657cfd5a4776b": {
+              "log_coordinates": {
+                "log_id": "sealed-fixture-log",
+                "seq": 2,
+                "leaf_index": 1
+              },
+              "inclusion_proof": {
+                "v": 1,
+                "kind": "inclusion",
+                "size": 4,
+                "leaf_index": 1,
+                "witness": [
+                  "c33e3c236a9ab8b9d9909b79bc08bd98f15536ae5a537b6adb0901b9bfb2287e"
+                ],
+                "peaks_left": [],
+                "peaks_right": [
+                  "f043ae9d81edf40087cab491264ce89311565ff884887906601a9b22c1248039"
+                ]
+              }
+            },
+            "203a04a26fa60441aad5bdb70e6c889ef6c4ea71a0e4f08226669fb67a63310f": {
+              "log_coordinates": {
+                "log_id": "sealed-fixture-log",
+                "seq": 3,
+                "leaf_index": 2
+              },
+              "inclusion_proof": {
+                "v": 1,
+                "kind": "inclusion",
+                "size": 4,
+                "leaf_index": 2,
+                "witness": [],
+                "peaks_left": [
+                  "6f99b480869761166614fdafd07357b6ec800571ef9aa0f9e734b4a59431c6c8"
+                ],
+                "peaks_right": []
+              }
+            }
+          }
+        },
+        "checkpoint": {
+          "root": "ebc331665290159ae90b81caea6bc2ea1df060c1613808bf682c3c550299924c",
+          "mmr_size": 4
+        }
+      }
+    }
+  ]
+}

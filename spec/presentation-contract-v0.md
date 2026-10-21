@@ -6,6 +6,10 @@ page: the module interface and the presentation ABI that versions it, the declar
 manifest a module is selected by, the two module trust classes, the chrome rule, the
 text-binding rule, the presentation invariants and the three depth levels every module fills. It is normative for any viewer, builder or module that
 claims to follow it. It defines no runtime code; the reference registry is a separate change.
+The core's fixed text (section 6.2) is pinned by the vectors in `vectors/presentation-core-text/`.
+Of the four banner states, `checking` is specified here, but that corpus does not yet carry a
+golden for it. That golden, and a slow-hash fixture that holds `checking` on screen until the
+check completes, are left to the viewer's four-state test.
 
 **Companion schema.** `schemas/presentation-manifest-v0.json`, a JSON Schema (2020-12) for one
 manifest (`$defs/PresentationManifest`) and for a wording pack (`$defs/WordingPack`). Its
@@ -153,7 +157,11 @@ whole report application with its own internal structure, built from these primi
 recompute a digest, signature or proof to decide whether something is valid, MUST NOT read a
 payload except through the context (in particular never from `window.__BUNDLE__` or the raw
 bundle's `disclosures`), and MUST NOT write, alter or restyle the words of the verification
-banner, the refusal or the core's verification checks. A module MAY recompute a derived
+banner, the refusal or the core's verification checks. The core also checks this when each
+module's `render` settles (section 6.2): a module that by then changed the banner, the line
+under it or a refusal line, or that drew a banner or a check list carrying the core's data
+attributes, has failed, and the page collapses as section 4.3 says a module's `render`
+failure does. A module MAY recompute a derived
 figure from verified content (a coverage count, a per-bucket total) and MUST then show a
 disagreement with the producer's stated figure as a disagreement, never silently prefer either.
 
@@ -232,7 +240,8 @@ presentation" notice) where a refused module matched says so, in these words.
   for `runtime_too_old`. When the bundle digest could not be computed, the cell begins
   `Integrity not verified;` instead of `Integrity verified;` and is otherwise the same. The row
   carries `data-semantics="refused"`, `data-refused-module="<id>"` and
-  `data-refusal="<reason>"`. A refusal takes precedence over "interpreted by": the refused
+  `data-refusal="<reason>"`. A refusal takes precedence over the interpreted line of section
+  6.2: the refused
   module did not run, so nothing interpreted the block on its behalf.
 - **When it requires no extension.** A refused module whose manifest requires no extension has
   no row of its own, so the verification section shows, after the extension rows, one line per
@@ -544,9 +553,11 @@ summary carried in the bundle:
   with a pointer to verify the bundle with a full verifier, which names no product or command.
 
 A check the bundle does not call for is in no list. An empty list is not drawn. Each line names
-what was checked, never its outcome, so it reads true under any of the three headings.
+what was checked, never its outcome, so it reads true under any of the three headings. Each
+line is in plain words and starts "Whether": it carries no internal token, no identifier and no
+empty data structure.
 
-The words are the core's own fixed text. A host MAY supply its own text for running a full
+The words are the core's own fixed text (section 6.2). A host MAY supply its own text for running a full
 verifier (for example a command line); it is presentation only, shown as text after the
 pointer, and it changes no list. Nothing from the bundle reaches the lists' words.
 
@@ -567,6 +578,138 @@ ran, passed, failed or were not run, and does not re-derive one from the verific
 the verification page is the one place a reader finds it. A module that shows a check's
 outcome beside the item it concerns (a signer marked verified or not, for example) is not
 restating the lists.
+
+### 6.2 The core's fixed text
+
+The banner, the line under it, the refusal, the check lists of section 6.1 and the other lines
+this section lists are the core's own fixed text. No module and no wording pack supplies,
+selects or alters any of it, and the core never reads a wording pack for it. Every page and
+every builder therefore shows the same words, and nothing a module or a pack carries can soften
+a failure. Every one of these strings is listed in
+`vectors/presentation-core-text/core-text.json` and stated here, in section 6.1 or in I1
+(section 8). Where the two disagree, this document governs and the vector is corrected to
+match.
+
+**The banner.** A page that checks a bundle shows exactly one of four states. The state is
+carried as `data-verify` on the banner, and the banner's words are exactly:
+
+| State | `data-verify` | Banner |
+|---|---|---|
+| checking | `checking` | `Checking…` |
+| verified | `verified` | `Unchanged since it was sealed` |
+| failed | `failed` | `Changed after it was sealed: do not rely on this page` |
+| unable to verify | `unable` | `Couldn't check this page here: check it with a full verifier` |
+
+The ellipsis in `Checking…` is the single character U+2026. The apostrophe in `Couldn't` is
+U+0027.
+
+- `checking` is shown from the moment the page has a bundle until the verification result is
+  in hand. `verified` and `failed` are never shown before the check completes.
+- `failed` is followed by the refusal of I1 (section 8), `data-refusal="unverified-bundle"`.
+- `unable to verify` is shown when the runtime cannot compute the digests the checks need (no
+  SHA-256), so nothing was checked. It is never drawn as `failed`: not in its words, not in its
+  `data-verify`, not in its style, and it is never followed by the refusal of I1. It is followed
+  by the core's own explanation, `data-refusal="unable-to-verify"`: `This viewer cannot compute
+  the SHA-256 digests the checks need, so nothing was checked and no records are shown. This is
+  not a failed check: the file may well be valid.` Then comes either `To check this file, run:`
+  and the exact command the host supplied for checking the file elsewhere or, without one, `To
+  check this file, open it from a secure (https) page, or check it with a verifier outside this
+  viewer.`
+- When a verified bundle supplies records that are not covered by the log's checkpoint, the
+  banner keeps its words. The count goes on a separate core line directly after it,
+  `data-banner-note="uncheckpointed"`, shown only when the count is above zero:
+  `<n> of <m> records are not covered by the log's checkpoint`. It reads `record` when `<m>`
+  is 1 and `is` when `<n>` is 1. The banner also carries the count as `data-uncheckpointed`.
+
+**The check-list lines** of section 6.1, by check:
+
+| Check | Line |
+|---|---|
+| `record-digests` | Whether each record still matches the fingerprint it was sealed with. |
+| `record-rules` | Whether each record has the fields it needs, and whether its effects, its verdict, its link to the record before it and its assurance claims are consistent. |
+| `closure` | Whether every record the main record cites, to the stated depth, is in this file or listed as missing. |
+| `range` | Whether any record is missing from the part of the log this file covers. |
+| `membership` | Whether each record that names a place in the log is at that place. |
+| `checkpoint-signature` | Whether the signature on the log's checkpoint is valid. |
+| `disclosures` | Whether each value shown still matches the fingerprint its record was sealed with. |
+| `countersignatures` | Whether each countersignature is a valid signature over this file, by the key it names. |
+| `composed` | Whether each file this one combines, and the fingerprint over the combination, still match. |
+| `cited-signers` | Whether the producer's signature is valid on the records this page names as signers, each marked beside it. Not the signature on every record. |
+| `producer-signatures` | Whether the producer's signature is valid on every record. |
+| `witness-receipts` | Whether each witness receipt in this file is valid. |
+| `countersignature-types` | Whether a countersignature of a type this page cannot check is valid. |
+| `countersignature-receipts` | Whether the receipt carried with a countersignature is valid. |
+
+The check names in the first column are `data-check` values, never reader-facing words. When
+the page passed the bundle without checking the checkpoint's signature, the
+`checkpoint-signature` line under "Not checked on this page" is followed by `This page could not
+check it, and shows the file as unchanged without it.` The not-checked list ends with `To run
+these checks, check this file with a full verifier.` and the lists end with `None of these
+checks says who produced the records, or that this file is the most recent copy.`
+
+**Each check and its result.** The verification section lists the base checks one by one, each
+in plain words with its result, and a disclosure row under each line, summary `Technical name`,
+holding the verifier's name for it:
+
+| Line | Technical name |
+|---|---|
+| Each record's required fields | Record check 1: required fields |
+| Each record against the fingerprint it was sealed with | Record check 2: capsule ID |
+| Each record's stated effects | Record checks 3 and 5: effect consistency |
+| Each record's verdict | Record check 4: verdict conflict |
+| Each record's link to the record before it | Record check 6: chain parent |
+| Each record's assurance claims | Record checks 7 and 8: assurance claims |
+| The fingerprint over the whole file | Bundle digest |
+| The records the main record cites | Graph closure |
+| The part of the log this file covers | Interval coverage |
+| Each record's place in the log | Per-record membership |
+
+The heading is `Each check and its result`. A result is one of `passed with no errors found`,
+`still withheld pending producer disclosure`, `failed at least one check` and `not checked,
+nothing was supplied`.
+
+**No empty structure.** A row whose value is an empty list (a completeness statement with no
+suppressed fields, for example) shows `none`, never `[]`.
+
+**Checkpoint coverage.** When the claim that each record sits in the log did not establish
+which records the checkpoint covers, the line is `Which records the log's checkpoint covers
+could not be established.`; when that claim was never evaluated (no checkpoint or no
+certificate), it is `Which records the log's checkpoint covers was not checked.` The verifier's
+findings are not in the line. They go in a `Technical name` disclosure row directly after it.
+
+**Extension rows.** The integrity cell is `covered` or `not covered`, as today. The meaning
+cell is exactly one of:
+
+- `Interpreted on this page`, when this rendering applied the extension's meaning. The
+  interpreter's name is in a `Technical name` disclosure row in the cell and in
+  `data-interpreter`.
+- `Contents shown by the page's module; not interpreted by the core`, when a module that
+  rendered on this page names the extension in its manifest's `requires.extensions.required`,
+  the extension is engaged (section 4.2), and the core does not apply its meaning. A page's own
+  extension is the module's content, not a warning.
+- `Not interpreted on this page`, for any other extension.
+- The refusal row of section 3.2, which takes precedence over all three.
+
+**A wording pack cannot supply the core's text.** The key prefix `core.` is reserved in every
+`aac.wording-pack/v0` pack and is never a module's key (section 7.4). A pack that carries a
+key beginning `core.` is refused as a whole: none of its words are used, and the page shows the
+core's line `The wording pack for this page was not used: it tries to supply the core's own
+text.`, carrying `data-refusal="wording-pack-core-key"`. The schema rejects such a pack
+(`neg-wording-pack-core-key.json`).
+
+**A module cannot write the core's text.** When each module's `render` settles (the page
+module, then any section), the core compares the banner, the line under it and every refusal
+line it drew with what it drew. The banner keeps its words, its `data-verify`, its
+`data-uncheckpointed` and its class, except as `setChromeClass` changed the class. The page holds exactly one element carrying `data-verify`
+and, before the core draws its verification section, none carrying a `data-checks` value of the
+core's check lists (`page`, `failed`, `not-checked`, `full-verifier`, `scope`). If any of these
+fails, the module has failed: everything any module wrote is discarded, and the page shows
+the `presentation-failed` refusal, exactly as for a module whose `render` throws (section 4.3).
+The check detects a change made through the DOM before `render` settles. It is not a sandbox.
+A trusted-executable module is trusted code (section 5.1), and the check cannot see work the
+module defers past its `render`, a stylesheet that hides or overlays the banner, or a banner or
+check list drawn without the core's data attributes. Each of these still breaks the rule of
+section 3 and makes the module non-conformant.
 
 ## 7. The text-binding rule
 
@@ -664,6 +807,10 @@ The two are distinct and neither stands in for the other: `page.title` names one
 no `module.title` shows the module `id`, never the `page.title`; a builder that finds no
 `page.title` never uses `module.title` for the page. Both are presentation words (section 7.3):
 neither ever comes from the bundle, and the manifest still carries no title (section 4.1).
+
+**Reserved prefix.** Every key that begins `core.` is reserved for the core's own text, which
+no pack supplies (section 6.2). A pack MUST NOT carry such a key, the schema rejects one, and a
+renderer refuses a pack that carries one as section 6.2 says.
 
 `wording_sha256` is the lowercase hex SHA-256 of the pack's **exact bytes as distributed**. The
 bytes are hashed as they are; a consumer MUST NOT re-serialize a pack before hashing it. A
@@ -786,6 +933,14 @@ before writing it. `vectors/presentation-resolution/` holds the shared resolutio
 table of appendix A.3, registration and refusal cases with their exact wording, and the
 descriptors of real bundles). They are normative for both: each implementation runs every case,
 and a result that differs from a case is a defect in that implementation.
+
+`vectors/presentation-core-text/` fixes the core's text of section 6.2. It holds every string,
+a golden for each of the three banner states a runtime reaches today (verified, with and
+without the line under it, failed, and unable to verify, which is never drawn as failed), and
+the refusal cases (a wording pack carrying a `core.` key, and modules that rewrite or restate
+the banner or the check lists, beside a module that only uses `setChromeClass` and is not
+refused). A runtime that draws the core's text runs every case. The `checking` golden and its
+slow-hash fixture are not in the corpus yet (see Status).
 
 ## Appendix A. The built-in manifests
 

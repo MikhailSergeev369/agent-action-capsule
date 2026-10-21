@@ -1,0 +1,127 @@
+{
+  "contract": "spec/presentation-contract-v0.md section 6.2",
+  "banner": {
+    "checking": "Checking…",
+    "verified": "Unchanged since it was sealed",
+    "failed": "Changed after it was sealed: do not rely on this page",
+    "unable": "Couldn't check this page here: check it with a full verifier"
+  },
+  "banner_note_uncheckpointed": {
+    "template": "<n> of <m> records are not covered by the log's checkpoint",
+    "cases": [
+      {
+        "n": 1,
+        "m": 1,
+        "line": "1 of 1 record is not covered by the log's checkpoint"
+      },
+      {
+        "n": 1,
+        "m": 3,
+        "line": "1 of 3 records is not covered by the log's checkpoint"
+      },
+      {
+        "n": 1,
+        "m": 4,
+        "line": "1 of 4 records is not covered by the log's checkpoint"
+      },
+      {
+        "n": 2,
+        "m": 3,
+        "line": "2 of 3 records are not covered by the log's checkpoint"
+      }
+    ]
+  },
+  "refusal_unverified_bundle": "This bundle did not verify. Its records, rows and payloads are not shown; the verification page below lists which checks failed.",
+  "unable": {
+    "reason": "This viewer cannot compute the SHA-256 digests the checks need, so nothing was checked and no records are shown. This is not a failed check: the file may well be valid.",
+    "command": "To check this file, run:",
+    "no_command": "To check this file, open it from a secure (https) page, or check it with a verifier outside this viewer."
+  },
+  "check_list_headings": {
+    "page": "Checked on this page",
+    "failed": "Failed on this page",
+    "not_checked": "Not checked on this page"
+  },
+  "check_lines": {
+    "record-digests": "Whether each record still matches the fingerprint it was sealed with.",
+    "record-rules": "Whether each record has the fields it needs, and whether its effects, its verdict, its link to the record before it and its assurance claims are consistent.",
+    "closure": "Whether every record the main record cites, to the stated depth, is in this file or listed as missing.",
+    "range": "Whether any record is missing from the part of the log this file covers.",
+    "membership": "Whether each record that names a place in the log is at that place.",
+    "checkpoint-signature": "Whether the signature on the log's checkpoint is valid.",
+    "disclosures": "Whether each value shown still matches the fingerprint its record was sealed with.",
+    "countersignatures": "Whether each countersignature is a valid signature over this file, by the key it names.",
+    "composed": "Whether each file this one combines, and the fingerprint over the combination, still match.",
+    "cited-signers": "Whether the producer's signature is valid on the records this page names as signers, each marked beside it. Not the signature on every record.",
+    "producer-signatures": "Whether the producer's signature is valid on every record.",
+    "witness-receipts": "Whether each witness receipt in this file is valid.",
+    "countersignature-types": "Whether a countersignature of a type this page cannot check is valid.",
+    "countersignature-receipts": "Whether the receipt carried with a countersignature is valid."
+  },
+  "checkpoint_not_checked_note": "This page could not check it, and shows the file as unchanged without it.",
+  "full_verifier_line": "To run these checks, check this file with a full verifier.",
+  "scope_line": "None of these checks says who produced the records, or that this file is the most recent copy.",
+  "check_rows": {
+    "heading": "Each check and its result",
+    "technical_summary": "Technical name",
+    "rows": [
+      {
+        "line": "Each record's required fields",
+        "technical": "Record check 1: required fields"
+      },
+      {
+        "line": "Each record against the fingerprint it was sealed with",
+        "technical": "Record check 2: capsule ID"
+      },
+      {
+        "line": "Each record's stated effects",
+        "technical": "Record checks 3 and 5: effect consistency"
+      },
+      {
+        "line": "Each record's verdict",
+        "technical": "Record check 4: verdict conflict"
+      },
+      {
+        "line": "Each record's link to the record before it",
+        "technical": "Record check 6: chain parent"
+      },
+      {
+        "line": "Each record's assurance claims",
+        "technical": "Record checks 7 and 8: assurance claims"
+      },
+      {
+        "line": "The fingerprint over the whole file",
+        "technical": "Bundle digest"
+      },
+      {
+        "line": "The records the main record cites",
+        "technical": "Graph closure"
+      },
+      {
+        "line": "The part of the log this file covers",
+        "technical": "Interval coverage"
+      },
+      {
+        "line": "Each record's place in the log",
+        "technical": "Per-record membership"
+      }
+    ],
+    "results": {
+      "pass": "passed with no errors found",
+      "withheld": "still withheld pending producer disclosure",
+      "fail": "failed at least one check",
+      "not_checked": "not checked, nothing was supplied"
+    }
+  },
+  "empty_value": "none",
+  "coverage_line": {
+    "not_established": "Which records the log's checkpoint covers could not be established.",
+    "withheld": "Which records the log's checkpoint covers was not checked."
+  },
+  "extension_meaning": {
+    "interpreted": "Interpreted on this page",
+    "module_content": "Contents shown by the page's module; not interpreted by the core",
+    "not_interpreted": "Not interpreted on this page"
+  },
+  "wording_pack_refused": "The wording pack for this page was not used: it tries to supply the core's own text."
+}

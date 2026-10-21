@@ -1,0 +1,123 @@
+{
+  "description": "Goldens for the banner states a runtime reaches today (spec section 6.2). A case names a literal bundle under vectors/ by file and case name, applies `patch` (RFC 6902 operations, in order) to it, and renders it with `digest` \"available\" or \"none\" (no SHA-256 in the runtime). `expect` is the banner's words and data attributes, the line under it (null: no such line) and the data-refusal of the line after it (null: none). `never` lists what the page must not show anywhere.",
+  "cases": [
+    {
+      "id": "verified",
+      "bundle": {
+        "file": "bundle/report-single-record.json",
+        "case": "pos-single-record-report"
+      },
+      "patch": [],
+      "digest": "available",
+      "expect": {
+        "data_verify": "verified",
+        "banner": "Unchanged since it was sealed",
+        "data_uncheckpointed": "0",
+        "banner_note": null,
+        "refusal": null
+      },
+      "never": {
+        "data_verify": [
+          "failed",
+          "unable",
+          "checking"
+        ],
+        "data_refusal": [
+          "unverified-bundle",
+          "unable-to-verify"
+        ]
+      }
+    },
+    {
+      "id": "verified-uncheckpointed",
+      "bundle": {
+        "file": "presentation-core-text/bundles.json",
+        "case": "verified-one-uncheckpointed"
+      },
+      "patch": [],
+      "digest": "available",
+      "expect": {
+        "data_verify": "verified",
+        "banner": "Unchanged since it was sealed",
+        "data_uncheckpointed": "1",
+        "banner_note": "1 of 4 records is not covered by the log's checkpoint",
+        "refusal": null
+      },
+      "never": {
+        "data_verify": [
+          "failed",
+          "unable",
+          "checking"
+        ],
+        "data_refusal": [
+          "unverified-bundle",
+          "unable-to-verify"
+        ]
+      }
+    },
+    {
+      "id": "failed",
+      "bundle": {
+        "file": "bundle/report-single-record.json",
+        "case": "neg-checkpoint-root-mismatch"
+      },
+      "patch": [],
+      "digest": "available",
+      "expect": {
+        "data_verify": "failed",
+        "banner": "Changed after it was sealed: do not rely on this page",
+        "data_uncheckpointed": "0",
+        "banner_note": null,
+        "refusal": "unverified-bundle"
+      },
+      "never": {
+        "data_verify": [
+          "verified",
+          "unable",
+          "checking"
+        ],
+        "data_refusal": [
+          "unable-to-verify"
+        ]
+      }
+    },
+    {
+      "id": "unable",
+      "bundle": {
+        "file": "bundle/report-single-record.json",
+        "case": "pos-single-record-report"
+      },
+      "patch": [],
+      "digest": "none",
+      "expect": {
+        "data_verify": "unable",
+        "banner": "Couldn't check this page here: check it with a full verifier",
+        "data_uncheckpointed": null,
+        "banner_note": null,
+        "refusal": "unable-to-verify"
+      },
+      "never": {
+        "data_verify": [
+          "failed",
+          "verified",
+          "checking"
+        ],
+        "data_refusal": [
+          "unverified-bundle"
+        ],
+        "text": [
+          "Changed after it was sealed: do not rely on this page",
+          "Unchanged since it was sealed"
+        ]
+      }
+    }
+  ],
+  "pending": [
+    {
+      "state": "checking",
+      "data_verify": "checking",
+      "banner": "Checking…",
+      "reason": "Specified in section 6.2. Its golden, and a slow-hash fixture that holds it on screen until the check completes, are left to the viewer's four-state test."
+    }
+  ]
+}

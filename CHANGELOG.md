@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Presentation contract: the core's banner and check lists are in plain words, and stay the
+  core's own fixed text (new section 6.2). The banner reads `Unchanged since it was sealed`
+  (verified), `Changed after it was sealed: do not rely on this page` (failed), `Couldn't check
+  this page here: check it with a full verifier` (unable to verify, never drawn as failed) or
+  `Checking…` (checking). A verified bundle's records outside the checkpoint are counted on a
+  separate line under the banner. Each check-list line starts "Whether" and names what was
+  checked, with no internal token or empty structure; technical names move to a `Technical
+  name` row. An extension the page's module uses reads `Contents shown by the page's module;
+  not interpreted by the core`, any other uninterpreted one `Not interpreted on this page`. The
+  wording-pack key prefix `core.` is reserved: the schema rejects a pack that carries one
+  (`neg-wording-pack-core-key.json`, with its mutant) and a renderer refuses it. The core checks
+  the banner after each module renders and collapses to the `presentation-failed` refusal when a
+  module rewrote it or drew its own banner or check list. New vectors
+  `vectors/presentation-core-text/` fix every string, hold goldens for the verified, failed and
+  unable states and the refusal cases. The `checking` golden and its slow-hash fixture are left
+  to the viewer's four-state test.
 - Outcome report model, TypeScript: a case that names its agent model (`case.agent_model`) now
   matches the conversation id `benchmark:domain:<model>:task-N:trial-T`; the id without the model
   still matches, and the transcript is still tied to the judged case by digest. New `reportState`

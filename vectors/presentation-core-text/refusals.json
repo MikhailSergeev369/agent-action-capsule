@@ -1,0 +1,168 @@
+{
+  "description": "Refusal cases for section 6.2. `packs`: a wording pack given to the renderer as its exact JSON text (JCS) with the SHA-256 of those bytes; `refused` true means none of its words are used and the page shows the core's wording_pack_refused line with data-refusal \"wording-pack-core-key\"; `schema_valid` is the pack's result under $defs/WordingPack. `modules`: a page module that renders on the verified golden bundle (states.json `verified`, or the case's own `state`) and performs `action` on the page during its render; `refused` true means the page shows the presentation-failed refusal and no module content, and the banner is the core's.",
+  "packs": [
+    {
+      "id": "module-keys-only",
+      "pack": {
+        "wording_pack_version": "aac.wording-pack/v0",
+        "id": "org.example.view.wording/v0",
+        "locale": "en",
+        "entries": {
+          "heading.l0": "What the comparison found",
+          "page.title": "Comparison",
+          "module.title": "Rules comparison"
+        }
+      },
+      "schema_valid": true,
+      "refused": false
+    },
+    {
+      "id": "core-banner-key",
+      "pack": {
+        "wording_pack_version": "aac.wording-pack/v0",
+        "id": "org.example.view.wording/v0",
+        "locale": "en",
+        "entries": {
+          "heading.l0": "What the comparison found",
+          "core.banner.verified": "All good"
+        }
+      },
+      "schema_valid": false,
+      "refused": true
+    },
+    {
+      "id": "core-check-line-key",
+      "pack": {
+        "wording_pack_version": "aac.wording-pack/v0",
+        "id": "org.example.view.wording/v0",
+        "locale": "en",
+        "entries": {
+          "core.check.record-digests": "Each record is fine."
+        }
+      },
+      "schema_valid": false,
+      "refused": true
+    },
+    {
+      "id": "bare-core-prefix",
+      "pack": {
+        "wording_pack_version": "aac.wording-pack/v0",
+        "id": "org.example.view.wording/v0",
+        "locale": "en",
+        "entries": {
+          "heading.l0": "Findings",
+          "core.": "x"
+        }
+      },
+      "schema_valid": false,
+      "refused": true
+    },
+    {
+      "id": "prefix-without-dot-is-the-module-s",
+      "pack": {
+        "wording_pack_version": "aac.wording-pack/v0",
+        "id": "org.example.view.wording/v0",
+        "locale": "en",
+        "entries": {
+          "corel.title": "Core findings",
+          "score.core.total": "Total"
+        }
+      },
+      "schema_valid": true,
+      "refused": false
+    }
+  ],
+  "modules": [
+    {
+      "id": "own-content-only",
+      "action": {
+        "kind": "append",
+        "tag": "p",
+        "text": "Module content",
+        "data": {}
+      },
+      "refused": false
+    },
+    {
+      "id": "chrome-class-through-host",
+      "action": {
+        "kind": "set-chrome-class"
+      },
+      "refused": false
+    },
+    {
+      "id": "rewrites-banner-words",
+      "action": {
+        "kind": "set-banner-text",
+        "text": "Everything checks out"
+      },
+      "refused": true
+    },
+    {
+      "id": "changes-banner-data-verify",
+      "action": {
+        "kind": "set-banner-data",
+        "name": "verify",
+        "value": "unable"
+      },
+      "refused": true
+    },
+    {
+      "id": "changes-banner-uncheckpointed",
+      "action": {
+        "kind": "set-banner-data",
+        "name": "uncheckpointed",
+        "value": "5"
+      },
+      "refused": true
+    },
+    {
+      "id": "restyles-banner-directly",
+      "action": {
+        "kind": "set-banner-class",
+        "value": "quiet"
+      },
+      "refused": true
+    },
+    {
+      "id": "removes-banner",
+      "action": {
+        "kind": "remove-banner"
+      },
+      "refused": true
+    },
+    {
+      "id": "draws-second-banner",
+      "action": {
+        "kind": "append",
+        "tag": "p",
+        "text": "Unchanged since it was sealed",
+        "data": {
+          "verify": "verified"
+        }
+      },
+      "refused": true
+    },
+    {
+      "id": "draws-own-check-list",
+      "action": {
+        "kind": "append",
+        "tag": "ul",
+        "text": "Whether each record still matches the fingerprint it was sealed with.",
+        "data": {
+          "checks": "page"
+        }
+      },
+      "refused": true
+    },
+    {
+      "id": "rewrites-banner-note",
+      "state": "verified-uncheckpointed",
+      "action": {
+        "kind": "set-banner-note-text",
+        "text": "All records are covered"
+      },
+      "refused": true
+    }
+  ]
+}
