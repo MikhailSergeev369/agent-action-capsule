@@ -4,8 +4,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  EXTENSION_INTERPRETED,
   EXTENSION_NOT_INTERPRETED,
   EXTENSION_NOT_INTERPRETED_NOT_COVERED,
+  EXTENSION_SHOWN_BY_MODULE,
   extensionRows,
   renderEvidenceGraph,
   verifyBundle,
@@ -34,11 +36,19 @@ const withExtensions = (bundle: Obj, extensions: Obj): Obj => ({
   },
 });
 
+// A cell's own words, without the Technical name row under them.
+const cellLine = (td: Element): string =>
+  Array.from(td.childNodes)
+    .filter((node) => node.nodeType === 3)
+    .map((node) => node.textContent)
+    .join("");
+
 interface Row {
   id: string | undefined;
   integrity: string | undefined;
   semantics: string | undefined;
   cells: string[];
+  technical: (string | undefined)[];
 }
 
 async function render(
@@ -53,7 +63,11 @@ async function render(
     id: tr.dataset.extensionId,
     integrity: tr.dataset.integrity,
     semantics: tr.dataset.semantics,
-    cells: Array.from(tr.querySelectorAll("td"), (td) => td.textContent ?? ""),
+    cells: Array.from(tr.querySelectorAll("td"), cellLine),
+    technical: Array.from(
+      tr.querySelectorAll("td"),
+      (td) => td.querySelector("[data-technical] span")?.textContent,
+    ),
   }));
   return { root, rows };
 }
@@ -70,9 +84,11 @@ const verdicts = (result: BundleVerificationResult) => ({
 
 describe("extension interpretation status", () => {
   it("the user-facing wording is exact", () => {
-    expect(EXTENSION_NOT_INTERPRETED).toBe(
-      "Integrity verified; meaning not interpreted by this viewer",
+    expect(EXTENSION_NOT_INTERPRETED).toBe("Not interpreted on this page");
+    expect(EXTENSION_SHOWN_BY_MODULE).toBe(
+      "Contents shown by the page's module; not interpreted by the core",
     );
+    expect(EXTENSION_INTERPRETED).toBe("Interpreted on this page");
   });
 
   it("an interpreted extension names its interpreter, with integrity in its own cell", async () => {
@@ -92,11 +108,8 @@ describe("extension interpretation status", () => {
         id: "presentation/v1",
         integrity: "covered",
         semantics: "interpreted",
-        cells: [
-          "presentation/v1",
-          "covered",
-          "interpreted by presentation-header",
-        ],
+        cells: ["presentation/v1", "covered", "Interpreted on this page"],
+        technical: [undefined, undefined, "presentation-header"],
       },
     ]);
   });
@@ -124,8 +137,9 @@ describe("extension interpretation status", () => {
         cells: [
           "x-acme-risk-score/v1",
           "covered",
-          "Integrity verified; meaning not interpreted by this viewer",
+          "Not interpreted on this page",
         ],
+        technical: [undefined, undefined, undefined],
       },
     ]);
     // The block's own words never reach the page.
@@ -224,7 +238,7 @@ describe("extension interpretation status", () => {
         id: "evidencebook/payloads",
         integrity: "covered",
         interpreter: "result-root",
-        semantics: "interpreted by result-root",
+        semantics: "Interpreted on this page",
       },
       { id: "x-a", integrity: "covered", semantics: EXTENSION_NOT_INTERPRETED },
     ]);

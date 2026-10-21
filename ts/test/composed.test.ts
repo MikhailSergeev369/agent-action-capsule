@@ -312,9 +312,16 @@ async function render(bundle: unknown): Promise<HTMLElement> {
   return root;
 }
 
+// A cell's own words, without the Technical name row under them.
+const cellLine = (td: Element): string =>
+  Array.from(td.childNodes)
+    .filter((node) => node.nodeType === 3)
+    .map((node) => node.textContent)
+    .join("");
+
 const extensionCells = (root: HTMLElement): string[][] =>
   Array.from(root.querySelectorAll("table[data-extensions] tbody tr"), (tr) =>
-    Array.from(tr.querySelectorAll("td"), (td) => td.textContent ?? ""),
+    Array.from(tr.querySelectorAll("td"), cellLine),
   );
 
 describe("the composition section", () => {
@@ -377,12 +384,13 @@ describe("the composition section", () => {
       ]);
       // The verification page now says the block was interpreted, by this module.
       expect(extensionCells(root)).toEqual([
-        [
-          "composed/v1",
-          "covered",
-          `interpreted by ${BUILTIN_MANIFEST_COMPOSED.id}`,
-        ],
+        ["composed/v1", "covered", "Interpreted on this page"],
       ]);
+      expect(
+        root.querySelector(
+          'tr[data-extension-id="composed/v1"] [data-technical] span',
+        )?.textContent,
+      ).toBe(BUILTIN_MANIFEST_COMPOSED.id);
     },
   );
 

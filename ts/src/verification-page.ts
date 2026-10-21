@@ -16,7 +16,10 @@ import type { VerificationResult } from "./verify.js";
 export type CheckStatus = "pass" | "withheld" | "fail" | "not_checked";
 
 export interface CheckSummary {
+  /** The check in plain words (presentation contract section 6.2). */
   readonly name: string;
+  /** The verifier's name for it, shown in a `Technical name` row. */
+  readonly technical: string;
   readonly status: CheckStatus;
   /** Exactly five words -- never "proves"/"certificate"/"tamper-proof"/"first". */
   readonly result: string;
@@ -92,18 +95,27 @@ export type CoverageStatement =
   | { readonly status: "withheld"; readonly reason: string };
 
 /**
- * The semantics cell of an uninterpreted extension whose block the bundle
- * digest covers. Exact user-facing wording: covered bytes are not understood
- * bytes, and this line never lets the first read as the second.
+ * The semantics cell of an extension nothing on this page interpreted
+ * (presentation contract section 6.2). Whether the bundle digest covers the
+ * block is the integrity cell's to say, so covered bytes never read as
+ * understood bytes.
  */
-export const EXTENSION_NOT_INTERPRETED =
-  "Integrity verified; meaning not interpreted by this viewer";
+export const EXTENSION_NOT_INTERPRETED = "Not interpreted on this page";
 /**
- * The same cell when the bundle digest could not be computed: nothing about
- * the block's bytes was verified either, so the line must not claim it.
+ * The same cell when the bundle digest could not be computed. It is the same
+ * words: the integrity cell says "not covered".
+ * @deprecated Use {@link EXTENSION_NOT_INTERPRETED}.
  */
-export const EXTENSION_NOT_INTERPRETED_NOT_COVERED =
-  "Integrity not verified; meaning not interpreted by this viewer";
+export const EXTENSION_NOT_INTERPRETED_NOT_COVERED = EXTENSION_NOT_INTERPRETED;
+/**
+ * The semantics cell of an extension a module that rendered on this page
+ * requires, whose meaning the core does not apply: the page's own extension
+ * is the module's content, not a warning.
+ */
+export const EXTENSION_SHOWN_BY_MODULE =
+  "Contents shown by the page's module; not interpreted by the core";
+/** The semantics cell of an extension this rendering interpreted. */
+export const EXTENSION_INTERPRETED = "Interpreted on this page";
 
 /**
  * One row per `extensions` member, in kind order: its id, whether the bundle
@@ -121,8 +133,14 @@ export interface ExtensionRow {
    */
   readonly refusal?: PresentationRefusal;
   /**
-   * "interpreted by <interpreter>", one of the two not-interpreted lines, or
-   * the refusal wording of section 3.2 (`presentationRefusalRow`).
+   * True when a module that rendered requires this extension and nothing
+   * interpreted it: the row says the module shows its contents.
+   */
+  readonly shownByModule?: boolean;
+  /**
+   * {@link EXTENSION_INTERPRETED}, {@link EXTENSION_SHOWN_BY_MODULE},
+   * {@link EXTENSION_NOT_INTERPRETED}, or the refusal wording of section 3.2
+   * (`presentationRefusalRow`).
    */
   readonly semantics: string;
 }
@@ -145,11 +163,14 @@ export interface PresentationRefusalNotice {
  * interpret but whose module did not render (an outcome-report/v1 block on a
  * root that is not a Result, say) is shown as not interpreted, because here
  * its meaning was not applied. Omitted, the verifier's status stands.
+ * `shownByModules` is the set of engaged kinds that a module which rendered
+ * requires (`requires.extensions.required`).
  */
 export function extensionRows(
   extensions: readonly ExtensionResult[],
   applied?: ReadonlySet<ExtensionInterpreterId>,
   refused: readonly PresentationRefusal[] = [],
+  shownByModules: ReadonlySet<string> = new Set(),
 ): readonly ExtensionRow[] {
   return extensions.map((extension): ExtensionRow => {
     const integrity = extension.integrityCovered ? "covered" : "not covered";
@@ -171,14 +192,19 @@ export function extensionRows(
         id: extension.kind,
         integrity,
         interpreter: extension.interpreter,
-        semantics: `interpreted by ${extension.interpreter}`,
+        semantics: EXTENSION_INTERPRETED,
+      };
+    if (shownByModules.has(extension.kind))
+      return {
+        id: extension.kind,
+        integrity,
+        shownByModule: true,
+        semantics: EXTENSION_SHOWN_BY_MODULE,
       };
     return {
       id: extension.kind,
       integrity,
-      semantics: extension.integrityCovered
-        ? EXTENSION_NOT_INTERPRETED
-        : EXTENSION_NOT_INTERPRETED_NOT_COVERED,
+      semantics: EXTENSION_NOT_INTERPRETED,
     };
   });
 }
@@ -393,13 +419,14 @@ export const FAILED_ON_THIS_PAGE = "Failed on this page";
 export const NOT_CHECKED_ON_THIS_PAGE = "Not checked on this page";
 /** Drawn after the not-checked list; it names no product or command. */
 export const FULL_VERIFIER_LINE =
-  "To run these checks, verify the bundle with a full verifier.";
+  "To run these checks, check this file with a full verifier.";
 /** Drawn after the lists, whatever they hold. */
 export const CHECKS_SCOPE_LINE =
   "None of these checks says who produced the records, or that this file is the most recent copy.";
 
 /**
- * One line per check, worded so it reads true under each heading: it names
+ * One line per check, in plain words (presentation contract section 6.2),
+ * worded so it reads true under each heading: it starts "Whether" and names
  * what was checked, never the outcome. A check this page did not run is
  * never called verified.
  */
@@ -407,33 +434,37 @@ export const VERIFICATION_CHECK_WORDS: Readonly<
   Record<VerificationCheckId, string>
 > = Object.freeze({
   "record-digests":
-    "Each record's contents against the capsule ID it was sealed with.",
+    "Whether each record still matches the fingerprint it was sealed with.",
   "record-rules":
-    "Each record's required fields, effects, verdict, chain parent and assurance claims.",
+    "Whether each record has the fields it needs, and whether its effects, its verdict, its link to the record before it and its assurance claims are consistent.",
   closure:
-    "That every record the root cites, to the stated depth, is in this file or listed as missing.",
+    "Whether every record the main record cites, to the stated depth, is in this file or listed as missing.",
   range:
-    "That no record is missing from the stretch of the log this file covers.",
-  membership: "That each record bound to a log position sits at that position.",
-  "checkpoint-signature": "The signature on the log's checkpoint.",
+    "Whether any record is missing from the part of the log this file covers.",
+  membership:
+    "Whether each record that names a place in the log is at that place.",
+  "checkpoint-signature":
+    "Whether the signature on the log's checkpoint is valid.",
   disclosures:
-    "Each disclosed value against the digest its record committed to.",
+    "Whether each value shown still matches the fingerprint its record was sealed with.",
   countersignatures:
-    "Each countersignature's signature, over this bundle's digest, under the key it names.",
+    "Whether each countersignature is a valid signature over this file, by the key it names.",
   composed:
-    "Each bundle this file composes, and the digest over the composition.",
+    "Whether each file this one combines, and the fingerprint over the combination, still match.",
   "cited-signers":
-    "The producer signature on the records this page cites as signers, each marked beside it as verified or not. Not the signature on every record.",
-  "producer-signatures": "The producer signature on every record.",
-  "witness-receipts": "Each witness receipt this file carries.",
+    "Whether the producer's signature is valid on the records this page names as signers, each marked beside it. Not the signature on every record.",
+  "producer-signatures":
+    "Whether the producer's signature is valid on every record.",
+  "witness-receipts": "Whether each witness receipt in this file is valid.",
   "countersignature-types":
-    "A countersignature of a type this page does not check.",
-  "countersignature-receipts": "The receipt carried with a countersignature.",
+    "Whether a countersignature of a type this page cannot check is valid.",
+  "countersignature-receipts":
+    "Whether the receipt carried with a countersignature is valid.",
 });
 
 /** Added to the checkpoint line when the page passed the bundle without it. */
 export const CHECKPOINT_NOT_CHECKED_NOTE =
-  "This page could not check it, and shows the bundle as passing without it.";
+  "This page could not check it, and shows the file as unchanged without it.";
 
 /** The words a list item shows for `id` under `list`. */
 export function verificationCheckWords(
@@ -594,12 +625,18 @@ export function verificationCheckLists(
 export const VERIFY_INDEPENDENTLY_LINE =
   "verify independently at verify.agentactioncapsule.org or with a full verifier";
 
-const FIVE_WORD_RESULT: Readonly<Record<CheckStatus, string>> = Object.freeze({
-  pass: "passed with no errors found",
-  withheld: "still withheld pending producer disclosure",
-  fail: "failed at least one check",
-  not_checked: "not checked no evidence supplied",
-});
+/** A check's result, in exactly five words, by status. */
+export const CHECK_RESULT_WORDS: Readonly<Record<CheckStatus, string>> =
+  Object.freeze({
+    pass: "passed with no errors found",
+    withheld: "still withheld pending producer disclosure",
+    fail: "failed at least one check",
+    not_checked: "not checked, nothing was supplied",
+  });
+
+/** The heading of the one-by-one checks, and the summary of each row under a line. */
+export const CHECK_ROWS_HEADING = "Each check and its result";
+export const TECHNICAL_NAME = "Technical name";
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -671,8 +708,12 @@ function completenessStatement(
   };
 }
 
-function summarize(name: string, status: CheckStatus): CheckSummary {
-  return { name, status, result: FIVE_WORD_RESULT[status] };
+function summarize(
+  name: string,
+  technical: string,
+  status: CheckStatus,
+): CheckSummary {
+  return { name, technical, status, result: CHECK_RESULT_WORDS[status] };
 }
 
 /**
@@ -680,7 +721,8 @@ function summarize(name: string, status: CheckStatus): CheckSummary {
  * the already-computed BundleVerificationResult (never bundle-supplied
  * markup). Ten named checks: six aggregate the base-profile Capsule checks
  * (numbered 1-8 by verifyClass1) into six groups; four are Bundle-level
- * claims already computed independently by verifyBundle.
+ * claims already computed independently by verifyBundle. `shownByModules`
+ * is passed to {@link extensionRows}.
  */
 export function buildVerificationPageModel(
   bundle: unknown,
@@ -688,38 +730,62 @@ export function buildVerificationPageModel(
   appliedInterpreters?: ReadonlySet<ExtensionInterpreterId>,
   refused: readonly PresentationRefusal[] = [],
   checkInputs: CheckListInputs = {},
+  shownByModules: ReadonlySet<string> = new Set(),
 ): VerificationPageModel {
   const top = object(bundle) ?? {};
   const checkpoint = object(top.checkpoint);
+  const capsules = verified.capsuleResults;
   const checks: CheckSummary[] = [
     summarize(
-      "Required fields",
-      capsuleGroupStatus(verified.capsuleResults, [1]),
+      "Each record's required fields",
+      "Record check 1: required fields",
+      capsuleGroupStatus(capsules, [1]),
     ),
     summarize(
-      "Capsule ID matches contents",
-      capsuleGroupStatus(verified.capsuleResults, [2]),
+      "Each record against the fingerprint it was sealed with",
+      "Record check 2: capsule ID",
+      capsuleGroupStatus(capsules, [2]),
     ),
     summarize(
-      "Effect consistency",
-      capsuleGroupStatus(verified.capsuleResults, [3, 5]),
+      "Each record's stated effects",
+      "Record checks 3 and 5: effect consistency",
+      capsuleGroupStatus(capsules, [3, 5]),
     ),
     summarize(
-      "Verdict conflict",
-      capsuleGroupStatus(verified.capsuleResults, [4]),
-    ),
-    summarize("Chain parent", capsuleGroupStatus(verified.capsuleResults, [6])),
-    summarize(
-      "Assurance claims",
-      capsuleGroupStatus(verified.capsuleResults, [7, 8]),
+      "Each record's verdict",
+      "Record check 4: verdict conflict",
+      capsuleGroupStatus(capsules, [4]),
     ),
     summarize(
+      "Each record's link to the record before it",
+      "Record check 6: chain parent",
+      capsuleGroupStatus(capsules, [6]),
+    ),
+    summarize(
+      "Each record's assurance claims",
+      "Record checks 7 and 8: assurance claims",
+      capsuleGroupStatus(capsules, [7, 8]),
+    ),
+    summarize(
+      "The fingerprint over the whole file",
       "Bundle digest",
       verified.bundleDigest === undefined ? "fail" : "pass",
     ),
-    summarize("Graph closure", verified.graphClosure.status),
-    summarize("Interval coverage", verified.intervalCoverage.status),
-    summarize("Per-record membership", verified.perRecordMembership.status),
+    summarize(
+      "The records the main record cites",
+      "Graph closure",
+      verified.graphClosure.status,
+    ),
+    summarize(
+      "The part of the log this file covers",
+      "Interval coverage",
+      verified.intervalCoverage.status,
+    ),
+    summarize(
+      "Each record's place in the log",
+      "Per-record membership",
+      verified.perRecordMembership.status,
+    ),
   ];
   const coverage = coverageStatement(verified);
   return {
@@ -746,6 +812,7 @@ export function buildVerificationPageModel(
       verified.extensions,
       appliedInterpreters,
       refused,
+      shownByModules,
     ),
     presentationRefusals: presentationRefusalNotices(refused),
     checkLists: verificationCheckLists(bundle, verified, checkInputs),

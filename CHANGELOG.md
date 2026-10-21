@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- TypeScript viewer: the core draws the plain words of presentation contract section 6.2 and
+  runs `vectors/presentation-core-text/`. New `VERIFICATION_BANNER` (the four states'
+  banners; this viewer draws `checking` only once the four-state test lands) and
+  `uncheckpointedLine`: a verified bundle's records outside the checkpoint are counted on a
+  separate line under the banner (`data-banner-note="uncheckpointed"`), no longer in the banner.
+  `UNABLE_TO_VERIFY_LINES.banner` is the unable state's banner. Check-list lines start
+  "Whether"; the one-by-one checks are headed `Each check and its result` and each carries a
+  `Technical name` disclosure (`CheckSummary.technical`); `CHECK_RESULT_WORDS` is exported. An
+  empty suppressed-fields value reads `none`. The checkpoint-coverage line no longer prints the
+  verifier's findings (`CHECKPOINT_COVERAGE_LINE`); they move to a `Technical name` row.
+  Extension rows read `Interpreted on this page` (the interpreter in `data-interpreter` and a
+  `Technical name` row), `Contents shown by the page's module; not interpreted by the core`
+  (`EXTENSION_SHOWN_BY_MODULE`, `data-shown-by-module`) for an engaged extension a module that
+  rendered requires, or `Not interpreted on this page`; `extensionRows` and
+  `buildVerificationPageModel` take the set of those kinds as a new last argument.
+  `EXTENSION_NOT_INTERPRETED_NOT_COVERED` is deprecated and now equals
+  `EXTENSION_NOT_INTERPRETED`. A wording pack that carries a `core.` key is refused with the core's
+  line (`WORDING_PACK_REFUSED`, `wordingPackSuppliesCoreText`). After each module renders, the
+  core checks the banner, the line under it and that no second banner or core check list was
+  drawn; a change collapses the page to the `presentation-failed` refusal.
 - Presentation contract: the core's banner and check lists are in plain words, and stay the
   core's own fixed text (new section 6.2). The banner reads `Unchanged since it was sealed`
   (verified), `Changed after it was sealed: do not rely on this page` (failed), `Couldn't check

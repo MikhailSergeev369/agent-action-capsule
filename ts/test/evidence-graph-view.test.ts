@@ -8,6 +8,14 @@ import { renderEvidenceGraph } from "../src/browser.js";
 import { derivedFixture } from "./helpers/derived-fixtures.js";
 import { sealEvidenceBundle } from "./helpers/sealed-bundle.js";
 
+// The Technical name row the core draws directly after a line.
+function technicalAfter(line: Element): string | undefined {
+  const row = line.nextElementSibling as HTMLElement | null;
+  return row?.dataset.technical === ""
+    ? (row.querySelector("span")?.textContent ?? undefined)
+    : undefined;
+}
+
 async function fixture(name: string): Promise<unknown> {
   return JSON.parse(
     await readFile(resolve(process.cwd(), "test", "testdata", name), "utf8"),
@@ -705,9 +713,10 @@ it("renders records that sit outside the checkpoint as uncheckpointed, one statu
   const banner = root.querySelector<HTMLElement>("[data-verify]")!;
   expect(banner.dataset.verify).toBe("verified");
   expect(banner.dataset.uncheckpointed).toBe("2");
-  expect(banner.textContent).toBe(
-    "Bundle verification passed; 2 of 4 records uncheckpointed",
-  );
+  expect(banner.textContent).toBe("Unchanged since it was sealed");
+  expect(
+    root.querySelector('[data-banner-note="uncheckpointed"]')?.textContent,
+  ).toBe("2 of 4 records are not covered by the log's checkpoint");
   expect(root.querySelector("[data-refusal]")).toBeNull();
 
   // every row rendered; none dropped
@@ -935,7 +944,10 @@ it("lists a record whose supplied membership entry was rejected as membership in
     '[data-coverage="not-established"]',
   )!;
   expect(line.textContent).toBe(
-    "coverage not established: membership_coordinates_invalid, membership_record_missing",
+    "Which records the log's checkpoint covers could not be established.",
+  );
+  expect(technicalAfter(line)).toBe(
+    "membership_coordinates_invalid, membership_record_missing",
   );
   expect(line.dataset.claim).toBe("not_established");
 });
@@ -954,7 +966,10 @@ it("marks no record checkpointed when the certificate carries no memberships obj
   const line = verification.querySelector<HTMLElement>(
     '[data-coverage="not-established"]',
   )!;
-  expect(line.textContent).toBe("coverage not established: memberships_absent");
+  expect(line.textContent).toBe(
+    "Which records the log's checkpoint covers could not be established.",
+  );
+  expect(technicalAfter(line)).toBe("memberships_absent");
   expect(verification.textContent).not.toContain("uncheckpointed of");
   const statuses = coverageStatuses(verification);
   expect(Object.keys(statuses)).toHaveLength(4);
@@ -986,8 +1001,9 @@ it("omits the coverage list when there is no checkpoint to stand under, and stil
     '[data-coverage="not-established"]',
   )!;
   expect(line.textContent).toBe(
-    "coverage not established: completeness_evidence_absent",
+    "Which records the log's checkpoint covers was not checked.",
   );
+  expect(technicalAfter(line)).toBe("completeness_evidence_absent");
   expect(line.dataset.claim).toBe("withheld");
   expect(verification.querySelector('[data-records="coverage"]')).toBeNull();
   expect(verification.querySelector("[data-record-status]")).toBeNull();
@@ -1005,8 +1021,11 @@ it("evaluation graph: an uncheckpointed act shows its own status and its checkpo
   const root = document.createElement("main");
   await renderEvidenceGraph(bundle, root);
   expect(root.querySelector<HTMLElement>("[data-verify]")!.textContent).toBe(
-    "Bundle verification passed; 1 of 5 records uncheckpointed",
+    "Unchanged since it was sealed",
   );
+  expect(
+    root.querySelector('[data-banner-note="uncheckpointed"]')?.textContent,
+  ).toBe("1 of 5 records is not covered by the log's checkpoint");
   expect(root.querySelectorAll("[data-report-date]")).toHaveLength(2);
   const panelFor = (capsuleId: string): HTMLElement =>
     Array.from(root.querySelectorAll("dl")).find((list) =>

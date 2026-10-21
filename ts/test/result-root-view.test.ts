@@ -246,14 +246,17 @@ it("renders a cited record outside the checkpoint as uncheckpointed under the Re
   const banner = root.querySelector<HTMLElement>("[data-verify]")!;
   expect(banner.dataset.verify).toBe("verified");
   expect(banner.dataset.uncheckpointed).toBe("1");
-  expect(banner.textContent).toBe(
-    "Bundle verification passed; 1 of 5 records uncheckpointed",
-  );
+  expect(banner.textContent).toBe("Unchanged since it was sealed");
+  expect(
+    root.querySelector('[data-banner-note="uncheckpointed"]')?.textContent,
+  ).toBe("1 of 5 records is not covered by the log's checkpoint");
   const page = root.querySelector<HTMLElement>('[data-page="result"]')!;
   expect(page).not.toBeNull();
   const coverage = page.querySelector<HTMLElement>('[data-coverage="result"]')!;
   expect(textBefore(page, coverage)).not.toMatch(/\d/u);
-  expect(textBefore(root, coverage)).toMatch(/1 of 5 records uncheckpointed/u);
+  expect(textBefore(root, coverage)).toMatch(
+    /1 of 5 records is not covered by the log's checkpoint/u,
+  );
   expect(page.querySelectorAll("[data-claim-row]")).toHaveLength(3);
 
   // the root's own panel is checkpointed; nothing cited is drawn yet

@@ -56,6 +56,7 @@ import {
 import { readPresentationBlock } from "./presentation.js";
 import {
   bundleVerified,
+  describeContext,
   PresentationAmbiguityError,
   PresentationRegistry,
   type PresentationBadgeState,
@@ -87,12 +88,14 @@ import {
 } from "./result-root.js";
 import {
   buildVerificationPageModel,
+  CHECK_ROWS_HEADING,
   CHECKED_ON_THIS_PAGE,
   CHECKS_SCOPE_LINE,
   FAILED_ON_THIS_PAGE,
   FULL_VERIFIER_LINE,
   NOT_CHECKED_ON_THIS_PAGE,
   RECEIPT_GRADE_DISPLAY,
+  TECHNICAL_NAME,
   verificationCheckWords,
   type VerificationCheckLists,
   type CheckSummary,
@@ -160,11 +163,29 @@ function appendTime(
 const recordsWord = (count: number): string =>
   `${count} ${count === 1 ? "record" : "records"}`;
 
+/**
+ * The banner's words for each verification state (presentation contract
+ * section 6.2): the core's own fixed text, never a module's or a wording
+ * pack's. `checking` is fixed here for the viewer's four-state test; this
+ * module draws the banner only once the result is in hand.
+ */
+export const VERIFICATION_BANNER = Object.freeze({
+  checking: "Checking\u2026",
+  verified: "Unchanged since it was sealed",
+  failed: "Changed after it was sealed: do not rely on this page",
+  unable: "Couldn't check this page here: check it with a full verifier",
+} as const);
+
+/** The core's line under a verified banner when records are outside the checkpoint. */
+export function uncheckpointedLine(count: number, total: number): string {
+  return `${count} of ${recordsWord(total)} ${count === 1 ? "is" : "are"} not covered by the log's checkpoint`;
+}
+
 // The banner is drawn from the verification result alone and precedes every
 // row in the DOM; an unverified bundle gets the refusal line here and no
 // rows at all, so a reader never meets a payload before the verdict on the
 // bundle that carries it. It says what IS proven: a verified bundle with
-// records outside the checkpoint names their count up front.
+// records outside the checkpoint names their count on the line under it.
 function renderVerificationBanner(
   root: HTMLElement,
   verified: boolean,
@@ -172,16 +193,22 @@ function renderVerificationBanner(
 ): HTMLElement {
   const banner = element(
     "p",
-    verified
-      ? coverage.uncheckpointed === 0
-        ? "Bundle verification passed"
-        : `Bundle verification passed; ${coverage.uncheckpointed} of ${recordsWord(coverage.total)} uncheckpointed`
-      : "Bundle verification failed",
+    verified ? VERIFICATION_BANNER.verified : VERIFICATION_BANNER.failed,
   );
   banner.dataset.verify = verified ? "verified" : "failed";
   banner.dataset.uncheckpointed = String(coverage.uncheckpointed);
   root.append(banner);
-  if (verified) return banner;
+  if (verified) {
+    if (coverage.uncheckpointed > 0) {
+      const note = element(
+        "p",
+        uncheckpointedLine(coverage.uncheckpointed, coverage.total),
+      );
+      note.dataset.bannerNote = "uncheckpointed";
+      root.append(note);
+    }
+    return banner;
+  }
   const refusal = element(
     "p",
     "This bundle did not verify. Its records, rows and payloads are not shown; the verification page below lists which checks failed.",
@@ -193,7 +220,7 @@ function renderVerificationBanner(
 
 /** The words a page says when this viewer cannot verify the bundle at all. */
 export const UNABLE_TO_VERIFY_LINES = {
-  banner: "Unable to verify in this viewer",
+  banner: VERIFICATION_BANNER.unable,
   reason:
     "This viewer cannot compute the SHA-256 digests the checks need, so nothing was checked and no records are shown. This is not a failed check: the file may well be valid.",
   command: "To check this file, run:",
@@ -351,6 +378,13 @@ function renderReceipts(
   host.append(list);
 }
 
+/** The checkpoint-coverage line when the claim did not establish it (contract section 6.2). */
+export const CHECKPOINT_COVERAGE_LINE = Object.freeze({
+  not_established:
+    "Which records the log's checkpoint covers could not be established.",
+  withheld: "Which records the log's checkpoint covers was not checked.",
+} as const);
+
 const COVERAGE_LABEL: Readonly<Record<RecordCoverageStatus, string>> =
   Object.freeze({
     checkpointed: "checkpointed",
@@ -381,10 +415,11 @@ function renderCheckpointCoverage(
     count.dataset.count = String(uncheckpointed);
     host.append(count);
   } else {
-    const line = element("p", `coverage not established: ${coverage.reason}`);
+    // The verifier's findings are technical names, never the line's words.
+    const line = element("p", CHECKPOINT_COVERAGE_LINE[coverage.status]);
     line.dataset.coverage = "not-established";
     line.dataset.claim = coverage.status;
-    host.append(line);
+    host.append(line, technicalName(coverage.reason));
     if (coverage.status === "withheld") return;
   }
   host.append(renderCoverageStatusCounts(records));
@@ -455,25 +490,36 @@ function renderCompletenessStatement(
     "payloads mode",
     completeness?.payloadsMode ?? "unstated",
   );
-  appendValue(
-    details,
-    "suppressed fields",
-    completeness?.suppressedFields ?? [],
+  // An empty list reads "none", never "[]" (contract section 6.2).
+  const suppressed = completeness?.suppressedFields ?? [];
+  details.append(
+    element("dt", "suppressed fields"),
+    element("dd", suppressed.length === 0 ? "none" : suppressed.join(", ")),
   );
   host.append(details);
+}
+
+// A native disclosure holding the verifier's name for a line, so the line
+// itself stays in plain words (contract section 6.2).
+function technicalName(name: string): HTMLDetailsElement {
+  const details = document.createElement("details");
+  details.dataset.technical = "";
+  details.append(element("summary", TECHNICAL_NAME), element("span", name));
+  return details;
 }
 
 function renderChecks(
   host: HTMLElement,
   checks: readonly CheckSummary[],
 ): void {
-  host.append(element("h4", "The ten checks"));
+  host.append(element("h4", CHECK_ROWS_HEADING));
   const list = element("ol");
   checks.forEach((check) => {
     const item = element("li");
     item.dataset.checkStatus = check.status;
     item.append(element("strong", check.name));
     item.append(element("span", `: ${check.result}`));
+    item.append(technicalName(check.technical));
     list.append(item);
   });
   host.append(list);
@@ -529,11 +575,13 @@ function renderExtensionTable(
       tr.dataset.refusedModule = row.refusal.id;
       tr.dataset.refusal = row.refusal.reason;
     }
-    tr.append(
-      element("td", row.id),
-      element("td", row.integrity),
-      element("td", row.semantics),
-    );
+    if (row.shownByModule === true) tr.dataset.shownByModule = "";
+    const meaning = element("td", row.semantics);
+    if (row.refusal === undefined && row.interpreter !== undefined) {
+      tr.dataset.interpreter = row.interpreter;
+      meaning.append(technicalName(row.interpreter));
+    }
+    tr.append(element("td", row.id), element("td", row.integrity), meaning);
     body.append(tr);
   }
   table.append(thead, body);
@@ -612,6 +660,7 @@ async function renderVerificationPage(
   refused: readonly PresentationRefusal[],
   citedSigners: boolean,
   verifierHint: string | undefined,
+  shownByModules: ReadonlySet<string>,
 ): Promise<void> {
   const { bundle, verification: verified, countersigners } = context;
   const section = element("section");
@@ -630,10 +679,14 @@ async function renderVerificationPage(
     declaredProducerKeys(bundle),
     countersigners,
   );
-  const model = buildVerificationPageModel(bundle, verified, applied, refused, {
-    stamps,
-    citedSigners,
-  });
+  const model = buildVerificationPageModel(
+    bundle,
+    verified,
+    applied,
+    refused,
+    { stamps, citedSigners },
+    shownByModules,
+  );
   const summary = element("dl");
   appendValue(summary, "bundle digest", model.bundleDigest ?? "uncomputable");
   appendValue(summary, "checkpoint root", model.checkpointRoot ?? "absent");
@@ -1808,6 +1861,53 @@ function presentationServices(
   });
 }
 
+/** The core's line when the page's wording pack tries to supply the core's text. */
+export const WORDING_PACK_REFUSED =
+  "The wording pack for this page was not used: it tries to supply the core's own text.";
+
+/**
+ * True when the pack carries a key under the reserved `core.` prefix
+ * (presentation contract sections 6.2 and 7.4): it tries to supply the
+ * core's own text, so the page uses none of its words. A pack that is not
+ * JSON carries no key, so this rule does not refuse it.
+ */
+export function wordingPackSuppliesCoreText(
+  wording: WordingPackInput,
+): boolean {
+  let pack: unknown;
+  try {
+    pack = JSON.parse(wording.pack);
+  } catch {
+    return false;
+  }
+  const entries = object(pack).entries;
+  return (
+    entries !== null &&
+    typeof entries === "object" &&
+    Object.keys(entries).some((key) => key.startsWith("core."))
+  );
+}
+
+// The `data-checks` values of the core's own check lists (renderCheckLists).
+const CORE_CHECKS = ["page", "failed", "not-checked", "full-verifier", "scope"];
+
+// What the core drew above every module (contract section 6.2): the banner,
+// the line under it, its refusal lines, and how many banners and core check
+// lists the page holds. A module's render that changes any of it has written the core's
+// text, and fails.
+function coreFrame(root: HTMLElement, banner: HTMLElement): string {
+  return JSON.stringify([
+    banner.parentElement === root,
+    banner.outerHTML,
+    [...root.querySelectorAll("[data-banner-note]")].map((n) => n.outerHTML),
+    [...root.querySelectorAll("[data-refusal]")].map((n) => n.outerHTML),
+    root.querySelectorAll("[data-verify]").length,
+    root.querySelectorAll(
+      CORE_CHECKS.map((value) => `[data-checks="${value}"]`).join(","),
+    ).length,
+  ]);
+}
+
 // The refusal for a verified bundle whose presentation could not be resolved
 // (an ambiguity) or failed (a module threw while rendering): the core's
 // words, no module content, the verification page below (contract I1).
@@ -1940,12 +2040,28 @@ export async function renderEvidenceGraph(
     total: Array.isArray(records) ? records.length : 0,
   };
 
+  const wordingRefused =
+    options.wording !== undefined &&
+    wordingPackSuppliesCoreText(options.wording);
   const drawFrame = (): HTMLElement => {
     root.replaceChildren();
     renderPresentationHeader(root, bundle);
-    return renderVerificationBanner(root, verified, coverage);
+    const drawn = renderVerificationBanner(root, verified, coverage);
+    if (wordingRefused) {
+      const line = element("p", WORDING_PACK_REFUSED);
+      line.dataset.refusal = "wording-pack-core-key";
+      root.append(line);
+    }
+    return drawn;
   };
   let banner = drawFrame();
+  // The core's frame as it stands; only setChromeClass may change it.
+  let frame = coreFrame(root, banner);
+  let tampered = false;
+  const checkFrame = (): void => {
+    if (tampered || coreFrame(root, banner) !== frame)
+      throw new Error("a module wrote the core's text");
+  };
   if (refused.length > 0)
     root.dataset.presentationRefused = refused.map((r) => r.id).join(" ");
   else delete root.dataset.presentationRefused;
@@ -1959,8 +2075,11 @@ export async function renderEvidenceGraph(
       setChromeClass(name: string): void {
         if (name !== OUTCOME_CHROME)
           throw new Error(`unknown chrome class ${JSON.stringify(name)}`);
+        // A change made before this call is still the module's own.
+        if (coreFrame(root, banner) !== frame) tampered = true;
         chrome = name;
         styleBanner(banner, verified);
+        frame = coreFrame(root, banner);
       },
     };
     try {
@@ -1969,6 +2088,7 @@ export async function renderEvidenceGraph(
         host,
         presentationServices(context),
       );
+      checkFrame();
     } catch {
       // Everything the module wrote is discarded; no other module is tried.
       chrome = undefined;
@@ -2001,6 +2121,7 @@ export async function renderEvidenceGraph(
         },
         presentationServices(context),
       );
+      checkFrame();
     } catch {
       chrome = undefined;
       banner = drawFrame();
@@ -2019,12 +2140,20 @@ export async function renderEvidenceGraph(
     "presentation-header",
     "countersignature-stamp",
   ]);
+  // The engaged extensions a module that rendered requires: their rows say
+  // the module shows their contents (contract section 6.2).
+  const shownByModules = new Set<string>();
+  const engaged = describeContext(context).extensions;
   if (refusal === undefined)
     for (const ran of [selected, section])
-      if (ran !== undefined)
+      if (ran !== undefined) {
         for (const id of BUILTIN_MODULE_INTERPRETERS[ran.module.manifest.id] ??
           [])
           applied.add(id);
+        for (const kind of ran.module.manifest.requires.extensions?.required ??
+          [])
+          if (engaged.has(kind)) shownByModules.add(kind);
+      }
   await renderVerificationPage(
     root,
     context,
@@ -2033,5 +2162,6 @@ export async function renderEvidenceGraph(
     refused,
     refusal === undefined && citesCheckedSigners(selected),
     options.verifierHint,
+    shownByModules,
   );
 }

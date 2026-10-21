@@ -125,7 +125,7 @@ describe("buildVerificationPageModel", () => {
     const verified = await verifyBundle({ not: "a bundle" });
     const model = buildVerificationPageModel({ not: "a bundle" }, verified);
     const closure = model.checks.find(
-      (check) => check.name === "Graph closure",
+      (check) => check.technical === "Graph closure",
     );
     expect(closure?.status).toBe("fail");
   });
