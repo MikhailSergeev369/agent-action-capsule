@@ -28,6 +28,14 @@
   their commitment, or a JSON original whose JSON-DIGEST is not the capsule's committed digest,
   resolve `disclosure_mismatch` (reportState `mismatch`), never `withheld`, so they unlock no
   claims fallback; only a payload left out is withheld.
+- TypeScript: the EU AI Act obligations card never reads an absent value as a pass, and says which
+  text is the producer's. An omitted `regulation` reads "not stated" instead of a filled-in
+  citation; an obligation whose tests are all not evaluable reads "Not evaluable", never "No
+  exceptions". Every producer-supplied field (obligation titles, test names, article, summary,
+  applicability, method, finding recommendations and owners, the not-evaluable and quality-protocol
+  notes) is named as the producer's mapping and set in italics, apart from the sealed counts,
+  verdicts, wording and rationale. The outcome-report card's resolved note says the rule resolves a
+  conversation (#193).
 
 ## 0.11.0 — 2026-10-20
 
