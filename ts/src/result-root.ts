@@ -479,6 +479,15 @@ export interface CitedRecord extends RecordTimes {
   readonly carriedCapsuleId?: string;
   readonly carriedInputDigest?: string;
   /**
+   * The carried capsule's own `action_id`, as it states it, under the same
+   * checks as `carriedCapsuleId` (absent when they fail or it states none).
+   * It is what the capsule declares itself to be (a benchmark case capsule
+   * is `urn:<benchmark>:<domain>:task-N:trial-T`), so a reader can tell a
+   * case capsule from a report, policy or rubric capsule without its
+   * input being disclosed.
+   */
+  readonly carriedActionId?: string;
+  /**
    * The occurrence-time fields the capsule itself states, verbatim, never
    * parsed or assigned a zone: its `timestamp` and, when present, its
    * `provenance_mode` block (AAC -05 "Provenance mode and backfilled
@@ -1144,16 +1153,30 @@ function base64UrlBytes(value: string): Uint8Array | undefined {
   }
 }
 
+/**
+ * The payload committed under `digest`: `absent` when the bundle supplies
+ * nothing under it, `failed` when it supplies something that is not
+ * base64url or does not hash to the commitment, else the checked bytes.
+ */
+async function bookPayload(
+  payloads: ObjectValue,
+  digest: string,
+): Promise<"absent" | "failed" | Uint8Array> {
+  if (!Object.hasOwn(payloads, digest)) return "absent";
+  const encoded = asString(payloads[digest]);
+  if (encoded === undefined) return "failed";
+  const bytes = base64UrlBytes(encoded);
+  if (bytes === undefined) return "failed";
+  return (await sha256Hex(bytes)) === digest ? bytes : "failed";
+}
+
 /** The payload bytes committed under `digest`, only when they hash to it. */
 async function verifiedBookPayload(
   payloads: ObjectValue,
   digest: string,
 ): Promise<Uint8Array | undefined> {
-  const encoded = asString(payloads[digest]);
-  if (encoded === undefined) return undefined;
-  const bytes = base64UrlBytes(encoded);
-  if (bytes === undefined) return undefined;
-  return (await sha256Hex(bytes)) === digest ? bytes : undefined;
+  const payload = await bookPayload(payloads, digest);
+  return typeof payload === "string" ? undefined : payload;
 }
 
 /**
@@ -1169,7 +1192,11 @@ async function verifiedBookPayload(
  * the header commits to hashes to its commitment AND its JSON-DIGEST equals
  * the capsule's own `agent_input_digest`. A capsule published before the book
  * carried originals (two payloads, capsule and producer envelope) resolves
- * `withheld`; a broken link resolves `disclosure_mismatch`.
+ * `withheld`; a broken link resolves `disclosure_mismatch`. A payload the
+ * bundle supplies but that fails -- bytes that do not hash to their
+ * commitment, or a JSON original whose JSON-DIGEST is not the capsule's
+ * committed digest -- is a broken link, never `withheld`: only a payload the
+ * bundle leaves out is withheld.
  */
 /**
  * The capsule a `published_capsule` book header carries, checked link by link
@@ -1181,7 +1208,13 @@ export async function carriedCapsuleCommitment(
   header: unknown,
   payloads: ObjectValue,
 ): Promise<
-  { capsuleId: string; inputDigest: string; stated: StatedTimes } | undefined
+  | {
+      capsuleId: string;
+      inputDigest: string;
+      stated: StatedTimes;
+      actionId?: string;
+    }
+  | undefined
 > {
   if (!isObject(header) || header.record_type !== PUBLISHED_CAPSULE_RECORD_TYPE)
     return undefined;
@@ -1201,11 +1234,13 @@ export async function carriedCapsuleCommitment(
       capsule as unknown as RecordWithId,
       "agent_input",
     );
+    const actionId = asString((capsule as unknown as ObjectValue).action_id);
     return isHex64(committed)
       ? {
           capsuleId: id,
           inputDigest: committed,
           stated: statedTimes(capsule as unknown as ObjectValue),
+          ...(actionId === undefined ? {} : { actionId }),
         }
       : undefined;
   } catch {
@@ -1243,17 +1278,39 @@ export async function resolveCarriedInput(
     return { state: "disclosure_mismatch" };
   }
   if (!isHex64(committed)) return { state: "withheld" };
+  // A supplied payload that fails is a broken link, whether or not another
+  // payload discloses: absent payloads are withheld, failing ones are not.
+  let disclosed: unknown;
+  let found = false;
+  let failed = false;
   for (const digest of commitments.slice(1)) {
-    const bytes = await verifiedBookPayload(payloads, digest);
-    if (bytes === undefined) continue;
+    const bytes = await bookPayload(payloads, digest);
+    if (bytes === "absent") continue;
+    if (bytes === "failed") {
+      failed = true;
+      continue;
+    }
+    let value: unknown;
     try {
-      const value: unknown = JSON.parse(utf8.decode(bytes));
-      if ((await jsonDigest(value)) === committed)
-        return { state: "disclosed", payload: value };
+      value = JSON.parse(utf8.decode(bytes));
     } catch {
-      /* not JSON (the producer envelope), or JCS cannot render it */
+      continue; /* not JSON: the producer envelope */
+    }
+    let digestOfValue: string | undefined;
+    try {
+      digestOfValue = await jsonDigest(value);
+    } catch {
+      digestOfValue = undefined; /* JCS cannot render it */
+    }
+    if (digestOfValue === committed) {
+      if (!found) disclosed = value;
+      found = true;
+    } else {
+      failed = true; /* a JSON original that is not the committed preimage */
     }
   }
+  if (failed) return { state: "disclosure_mismatch" };
+  if (found) return { state: "disclosed", payload: disclosed };
   // An original attached at disclose time (AGENT_INPUT_ORIGINALS_EXTENSION),
   // keyed by the capsule id just recomputed: disclosed only when its
   // JSON-DIGEST is the capsule's committed agent_input_digest.
@@ -1422,6 +1479,9 @@ export async function buildResultRoot(input: unknown): Promise<ResultRoot> {
         : {
             carriedCapsuleId: carriedCapsule.capsuleId,
             carriedInputDigest: carriedCapsule.inputDigest,
+            ...(carriedCapsule.actionId === undefined
+              ? {}
+              : { carriedActionId: carriedCapsule.actionId }),
           }),
       ...(carriedCapsule !== undefined
         ? { stated: carriedCapsule.stated }

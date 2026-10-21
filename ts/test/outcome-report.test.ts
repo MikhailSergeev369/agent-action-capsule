@@ -5,6 +5,7 @@ import { jsonDigest } from "../src/json.js";
 import {
   buildOutcomeReportModel,
   NOT_STATED,
+  parseJudgeProbabilities,
   readOutcomeReportTerms,
   RESOLUTION_RULE,
   verifyJudgePin,
@@ -515,13 +516,23 @@ it("reads a criterion as 'mixed' when its claims disagree on tier, never silentl
 // "not stated" on every real bundle.
 // ---------------------------------------------------------------------------
 
+/**
+ * `checked` (default true): the carried capsule checks out, so the record
+ * carries `carriedCapsuleId`; false models a report capsule that is missing
+ * or fails its digest (resolveCarriedInput still says "withheld").
+ */
 function asBookForm(
   result: ResultRoot,
   carried: (record: CitedRecord) => CitedRecord["carriedInput"],
+  checked = true,
 ): ResultRoot {
   const records = new Map<string, CitedRecord>();
-  for (const [id, record] of result.records) {
-    const carriedInput = carried(record);
+  for (const [id, original] of result.records) {
+    const carriedInput = carried(original);
+    // An unchecked carried capsule states no times either (result-root.ts).
+    const { stated, ...unstated } = original;
+    const record = checked ? original : unstated;
+    void stated;
     records.set(id, {
       ...record,
       agentInput: {
@@ -529,6 +540,7 @@ function asBookForm(
         payload: { record_type: "published_capsule", subject_ref: id },
       },
       ...(carriedInput === undefined ? {} : { carriedInput }),
+      ...(checked ? { carriedCapsuleId: id } : {}),
     });
   }
   return { ...result, records };
@@ -562,10 +574,50 @@ it("a book-form record whose carried report is withheld yields no report fields 
     state: "withheld",
   }));
   const model = buildOutcomeReportModel(result, { percentages: false });
-  expect(model.days.map((day) => day.date)).toEqual(["unknown"]);
+  // The period falls back to the report capsule's own stated timestamp (a
+  // checked capsule field), never to the book header.
+  const stated = [...result.records.values()]
+    .map((r) => r.stated?.timestamp?.slice(0, 10))
+    .filter((d): d is string => d !== undefined);
+  expect(model.days.map((day) => day.date)).toEqual(
+    [...new Set(stated)].sort().slice(0, 1),
+  );
+  expect(model.days.map((day) => day.date)).not.toContain("unknown");
   expect(model.runInfo.judgePinDigest).toBeUndefined();
+  // withheld, never "not stated": the view says the reports are withheld
+  expect(model.runInfo.reportsWithheld).toBeGreaterThan(0);
+  expect(model.runInfo.reportsWithheld).toBe(model.runInfo.reportsCited);
   // the contract is still the Result's own: every claim names it
   expect(model.runInfo.contract).toBe("tau2-airline-outcomes/v1@1");
+});
+
+it("a book-form report whose carried capsule is missing or fails its checks is invalid, never withheld: counted apart, no judged-day fallback", async () => {
+  const { bundle } = await sealEvidenceBundle(
+    fixture("outcome-report-bundle.json"),
+  );
+  // resolveCarriedInput says "withheld" for absent or corrupted capsule
+  // bytes; with no checked carried capsule (no carriedCapsuleId) that is a
+  // broken report, not a withheld one.
+  const result = asBookForm(
+    await buildResultRoot(bundle),
+    () => ({ state: "withheld" }),
+    false,
+  );
+  const model = buildOutcomeReportModel(result, { percentages: false });
+  expect(model.runInfo.reportsWithheld).toBeUndefined();
+  expect(model.runInfo.reportsInvalid).toBeGreaterThan(0);
+  expect(model.runInfo.reportsInvalid).toBe(model.runInfo.reportsCited);
+  expect(
+    new Set(
+      model.conversations.flatMap((c) =>
+        c.criteria.flatMap((cr) =>
+          cr.claim === undefined ? [] : [cr.reportState],
+        ),
+      ),
+    ),
+  ).toEqual(new Set(["invalid"]));
+  expect(model.days.map((day) => day.date)).toEqual(["unknown"]);
+  expect(model.conversations.every((c) => c.caseFrom === undefined)).toBe(true);
 });
 
 it("draws the contract from the claims' contract_ref (the versioned ref), not the reports' unversioned contract id", async () => {
@@ -657,7 +709,40 @@ describe("conversation transcript", () => {
     citeCase?: boolean;
     citeTranscript?: boolean;
     caseId?: string;
+    /** The conversation id the claims use (default the model-less CASE). */
+    conversationId?: string;
+    /** `case.agent_model` in the sealed transcript payload. */
+    agentModel?: string;
+    /** Withhold every report (no transcripts attached): only the report capsules' stated timestamps remain. */
+    withholdReports?: boolean;
+    /** Replace every report's resolved input (a mismatch, a non-object payload, a report naming no case). */
+    reportInput?: unknown;
+    /** Replace only the first report's resolved input. */
+    firstReportInput?: unknown;
+    /** The case capsule's own `action_id` (default `urn:<conversation id>`, the case model's); null states none. */
+    caseActionId?: string | null;
   }): ResultRoot {
+    const conversationId = options.conversationId ?? CASE;
+    const payload =
+      options.agentModel === undefined
+        ? transcriptPayload
+        : {
+            ...transcriptPayload,
+            case: {
+              ...transcriptPayload.case,
+              agent_model: options.agentModel,
+            },
+          };
+    const reportInput = {
+      state: "disclosed",
+      payload: {
+        verdict: "met",
+        source_capsule_id: SOURCE,
+        period: "day:2026-09-23",
+        rationale:
+          "jev choice: met (probabilities={'met': 0.9, 'not_met': 0.1}, confidence=0.8).",
+      },
+    };
     const records = new Map<string, unknown>();
     const claims = [];
     for (const check of FIXTURE_CHECKS)
@@ -666,16 +751,22 @@ describe("conversation transcript", () => {
         const report = `r-${ref}`;
         records.set(report, {
           capsuleId: report,
-          agentInput: {
-            state: "disclosed",
-            payload: {
-              verdict: "met",
-              source_capsule_id: SOURCE,
-              period: "day:2026-09-23",
-              rationale:
-                "jev choice: met (probabilities={'met': 0.9, 'not_met': 0.1}, confidence=0.8).",
-            },
-          },
+          ...(options.firstReportInput !== undefined && records.size === 0
+            ? {
+                agentInput: options.firstReportInput,
+                stated: { timestamp: "2026-09-23T23:59:59Z" },
+              }
+            : options.withholdReports === true
+              ? {
+                  agentInput: { state: "withheld" },
+                  stated: { timestamp: "2026-09-23T23:59:59Z" },
+                }
+              : options.reportInput !== undefined
+                ? {
+                    agentInput: options.reportInput,
+                    stated: { timestamp: "2026-09-23T23:59:59Z" },
+                  }
+                : { agentInput: reportInput }),
           agentOutput: { state: "absent" },
           cites: [],
         });
@@ -685,7 +776,7 @@ describe("conversation transcript", () => {
         if (options.citeTranscript !== false)
           evidence.push({ digest: "tx-rec", resolved: true });
         claims.push({
-          id: `${CASE}::${ref}`,
+          id: `${conversationId}::${ref}`,
           type: "requirement",
           recognized: true,
           contractRef: "airline-support-outcomes@1.4.0",
@@ -699,17 +790,21 @@ describe("conversation transcript", () => {
       }
     records.set("case-rec", {
       capsuleId: "case-rec",
+      stated: { timestamp: "2025-06-05T16:09:32Z" },
       agentInput: { state: "disclosed", payload: {} },
       carriedInput: { state: "withheld" },
       carriedCapsuleId: options.caseId ?? SOURCE,
       carriedInputDigest: options.caseDigest ?? DIGEST,
+      ...(options.caseActionId === null
+        ? {}
+        : { carriedActionId: options.caseActionId ?? `urn:${conversationId}` }),
       agentOutput: { state: "absent" },
       cites: [],
     });
     records.set("tx-rec", {
       capsuleId: "tx-rec",
       agentInput: { state: "disclosed", payload: {} },
-      carriedInput: { state: "disclosed", payload: transcriptPayload },
+      carriedInput: { state: "disclosed", payload },
       carriedCapsuleId: "b".repeat(64),
       carriedInputDigest: options.transcriptDigest ?? DIGEST,
       agentOutput: { state: "absent" },
@@ -755,6 +850,325 @@ describe("conversation transcript", () => {
       options,
     );
     expect(model.conversations[0]!.transcript.state).toBe("mismatch");
+  });
+
+  it("matches a case id that names the agent model (case.agent_model), the four-model backfill form", () => {
+    const model = buildOutcomeReportModel(
+      synthetic({
+        conversationId:
+          "tau2:airline:claude-3-7-sonnet-20250219:task-7:trial-0",
+        agentModel: "claude-3-7-sonnet-20250219",
+      }),
+      options,
+    );
+    expect(model.conversations[0]!.transcript.state).toBe("verified");
+  });
+
+  it("still matches the older model-less id when the case carries a model", () => {
+    const model = buildOutcomeReportModel(
+      synthetic({ agentModel: "claude-3-7-sonnet-20250219" }),
+      options,
+    );
+    expect(model.conversations[0]!.transcript.state).toBe("verified");
+  });
+
+  it("is a mismatch when the id names a different model than the sealed case", () => {
+    const model = buildOutcomeReportModel(
+      synthetic({
+        conversationId: "tau2:airline:gpt-4.1-2025-04-14:task-7:trial-0",
+        agentModel: "claude-3-7-sonnet-20250219",
+      }),
+      options,
+    );
+    expect(model.conversations[0]!.transcript.state).toBe("mismatch");
+  });
+
+  it("with the reports withheld: the case is the one every claim cites, the judged day is the report capsule's own timestamp, and the pin reads withheld", () => {
+    // the case record carries the transcript itself, as the real books do
+    const result = synthetic({ withholdReports: true, citeTranscript: false });
+    const caseRec = result.records.get("case-rec")!;
+    (result.records as Map<string, unknown>).set("case-rec", {
+      ...caseRec,
+      carriedInput: { state: "disclosed", payload: transcriptPayload },
+    });
+    const model = buildOutcomeReportModel(result, options);
+    const conversation = model.conversations[0]!;
+    expect(conversation.sourceCapsuleId).toBe(SOURCE);
+    expect(conversation.caseFrom).toBe("claims");
+    expect(conversation.judgedDay).toBe("2026-09-23");
+    expect(conversation.day).toBe("2025-06-05");
+    // never "verified": no report names the case the judge read
+    expect(conversation.transcript.state).toBe("cited");
+    expect(conversation.transcript.transcriptRecordId).toBe("case-rec");
+    expect(conversation.transcript.turns).toHaveLength(3);
+    expect(model.runInfo.judgePinDigest).toBeUndefined();
+    expect(model.runInfo.reportsWithheld).toBe(9);
+    expect(model.runInfo.reportsCited).toBe(9);
+  });
+
+  /** The case record carries the transcript itself, as the real books do; no separate transcript record is cited. */
+  function caseCarriesTranscript(result: ResultRoot): ResultRoot {
+    const caseRec = result.records.get("case-rec")!;
+    (result.records as Map<string, unknown>).set("case-rec", {
+      ...caseRec,
+      carriedInput: { state: "disclosed", payload: transcriptPayload },
+    });
+    return result;
+  }
+
+  it("counts only withheld reports as withheld: a mismatched or non-object report is counted apart, and each criterion says which", () => {
+    const mismatched = buildOutcomeReportModel(
+      synthetic({ reportInput: { state: "disclosure_mismatch" } }),
+      options,
+    );
+    expect(mismatched.runInfo.reportsWithheld).toBeUndefined();
+    expect(mismatched.runInfo.reportsMismatched).toBe(9);
+    expect(mismatched.runInfo.reportsCited).toBe(9);
+    expect(
+      mismatched.conversations[0]!.criteria.map((c) => c.reportState),
+    ).toEqual(Array(9).fill("mismatch"));
+    const notObject = buildOutcomeReportModel(
+      synthetic({ reportInput: { state: "disclosed", payload: "met" } }),
+      options,
+    );
+    expect(notObject.runInfo.reportsWithheld).toBeUndefined();
+    expect(notObject.runInfo.reportsUnreadable).toBe(9);
+    const mixed = buildOutcomeReportModel(
+      synthetic({
+        withholdReports: true,
+        firstReportInput: { state: "disclosure_mismatch" },
+      }),
+      options,
+    );
+    expect(mixed.runInfo.reportsWithheld).toBe(8);
+    expect(mixed.runInfo.reportsMismatched).toBe(1);
+    expect(mixed.runInfo.reportsCited).toBe(9);
+    // a disclosed report is neither, and adds no counts
+    const disclosed = buildOutcomeReportModel(synthetic({}), options);
+    expect(disclosed.runInfo.reportsCited).toBeUndefined();
+    expect(disclosed.conversations[0]!.criteria[0]!.reportState).toBe(
+      "disclosed",
+    );
+  });
+
+  it("takes the case from the claims only when every report is withheld: disclosed reports naming no case leave it unresolved, and the transcript is not verified", () => {
+    // an older pipeline: reports disclosed, no source_capsule_id
+    const model = buildOutcomeReportModel(
+      caseCarriesTranscript(
+        synthetic({
+          citeTranscript: false,
+          reportInput: {
+            state: "disclosed",
+            payload: { verdict: "met", period: "day:2026-09-23" },
+          },
+        }),
+      ),
+      options,
+    );
+    const conversation = model.conversations[0]!;
+    expect(conversation.sourceCapsuleId).toBeUndefined();
+    expect(conversation.caseFrom).toBeUndefined();
+    expect(conversation.transcript.state).not.toBe("verified");
+  });
+
+  it("takes no case from the claims when the reports are mismatched, or only some are withheld", () => {
+    for (const result of [
+      synthetic({
+        citeTranscript: false,
+        reportInput: { state: "disclosure_mismatch" },
+      }),
+      synthetic({
+        citeTranscript: false,
+        withholdReports: true,
+        firstReportInput: { state: "disclosure_mismatch" },
+      }),
+    ]) {
+      const conversation = buildOutcomeReportModel(
+        caseCarriesTranscript(result),
+        options,
+      ).conversations[0]!;
+      expect(conversation.sourceCapsuleId).toBeUndefined();
+      expect(conversation.transcript.state).not.toBe("verified");
+    }
+  });
+
+  /** Add a record to a synthetic result and cite it beside every claim's report. */
+  function citing(
+    result: ResultRoot,
+    key: string,
+    record: Record<string, unknown>,
+    which: (index: number) => boolean = () => true,
+  ): ResultRoot {
+    (result.records as Map<string, unknown>).set(key, {
+      capsuleId: key,
+      agentInput: { state: "disclosed", payload: {} },
+      agentOutput: { state: "absent" },
+      cites: [],
+      ...record,
+    });
+    return {
+      ...result,
+      claims: result.claims.map((claim, index) =>
+        which(index)
+          ? {
+              ...claim,
+              evidence: [...claim.evidence, { digest: key, resolved: true }],
+            }
+          : claim,
+      ),
+    } as ResultRoot;
+  }
+
+  it("with the reports withheld, the default [report, case, transcript] layout takes the case from the claims; the transcript is 'cited' through a different record, never 'verified'", () => {
+    const model = buildOutcomeReportModel(
+      synthetic({ withholdReports: true }),
+      options,
+    );
+    const conversation = model.conversations[0]!;
+    expect(conversation.sourceCapsuleId).toBe(SOURCE);
+    expect(conversation.caseFrom).toBe("claims");
+    expect(conversation.transcript.state).toBe("cited");
+    expect(conversation.transcript.transcriptRecordId).toBe("tx-rec");
+    expect(conversation.transcript.reason).toContain(
+      "which conversation the judge read is not shown",
+    );
+  });
+
+  it("with the reports withheld, conflicting cases with a shared transcript give no case: the shared transcript is never the case", () => {
+    // half the claims cite case A, half case B; all cite transcript C
+    const result = citing(
+      synthetic({ withholdReports: true, citeCase: false }),
+      "case-b",
+      {
+        carriedInput: { state: "withheld" },
+        carriedCapsuleId: "e".repeat(64),
+        carriedInputDigest: DIGEST,
+        carriedActionId: `urn:${CASE}`,
+        stated: { timestamp: "2025-06-05T16:09:32Z" },
+      },
+      (index) => index % 2 === 1,
+    );
+    const withA = {
+      ...result,
+      claims: result.claims.map((claim, index) =>
+        index % 2 === 0
+          ? {
+              ...claim,
+              evidence: [
+                ...claim.evidence,
+                { digest: "case-rec", resolved: true },
+              ],
+            }
+          : claim,
+      ),
+    } as ResultRoot;
+    const conversation = buildOutcomeReportModel(withA, options)
+      .conversations[0]!;
+    expect(conversation.sourceCapsuleId).toBeUndefined();
+    expect(conversation.caseFrom).toBeUndefined();
+    expect(conversation.transcript.state).toBe("mismatch");
+    expect(conversation.dated.basis).toBe("judged");
+  });
+
+  it("with the reports withheld, a shared non-case record every claim cites (a policy, rubric or judge-pin capsule) is never the case", () => {
+    const result = citing(
+      synthetic({
+        withholdReports: true,
+        citeCase: false,
+        citeTranscript: false,
+      }),
+      "policy-rec",
+      {
+        carriedInput: { state: "withheld" },
+        carriedCapsuleId: "f".repeat(64),
+        carriedInputDigest: "9".repeat(64),
+        carriedActionId: "urn:evidencebook-skills:policy:airline",
+        stated: { timestamp: "2024-01-01T00:00:00Z" },
+      },
+    );
+    const conversation = buildOutcomeReportModel(result, options)
+      .conversations[0]!;
+    expect(conversation.sourceCapsuleId).toBeUndefined();
+    expect(conversation.dated.basis).toBe("judged");
+    expect(conversation.day).toBe("2026-09-23");
+    // a plain record (no checked carried capsule) is never a case either
+    const plain = citing(
+      synthetic({
+        withholdReports: true,
+        citeCase: false,
+        citeTranscript: false,
+      }),
+      "plain-rec",
+      { stated: { timestamp: "2024-01-01T00:00:00Z" } },
+    );
+    expect(
+      buildOutcomeReportModel(plain, options).conversations[0]!.sourceCapsuleId,
+    ).toBeUndefined();
+  });
+
+  it("with the reports withheld, a case record that declares no case, or another conversation's case, is not this conversation's case", () => {
+    for (const caseActionId of [null, "urn:tau2:airline:task-8:trial-0"]) {
+      const conversation = buildOutcomeReportModel(
+        synthetic({ withholdReports: true, caseActionId }),
+        options,
+      ).conversations[0]!;
+      expect(conversation.sourceCapsuleId).toBeUndefined();
+      expect(conversation.transcript.state).not.toBe("cited");
+      expect(conversation.transcript.state).not.toBe("verified");
+    }
+  });
+
+  it("with the reports withheld, a case the claims of another conversation also cite is refused for both", () => {
+    const one = synthetic({ withholdReports: true });
+    const other = "tau2:airline:task-9:trial-0";
+    const result = {
+      ...one,
+      claims: [
+        ...one.claims,
+        ...one.claims.map((claim) => ({
+          ...claim,
+          id: claim.id.replace(CASE, other),
+        })),
+      ],
+    } as ResultRoot;
+    const model = buildOutcomeReportModel(result, options);
+    expect(model.conversations).toHaveLength(2);
+    for (const conversation of model.conversations) {
+      expect(conversation.sourceCapsuleId).toBeUndefined();
+      expect(conversation.transcript.state).not.toBe("cited");
+    }
+  });
+
+  it("with the reports withheld, a model-named conversation matches the model-less case action id the backfill seals", () => {
+    const conversationId =
+      "tau2:airline:claude-3-7-sonnet-20250219:task-7:trial-0";
+    const conversation = buildOutcomeReportModel(
+      synthetic({
+        withholdReports: true,
+        conversationId,
+        agentModel: "claude-3-7-sonnet-20250219",
+        caseActionId: `urn:${CASE}`,
+      }),
+      options,
+    ).conversations[0]!;
+    expect(conversation.caseFrom).toBe("claims");
+    expect(conversation.transcript.state).toBe("cited");
+  });
+
+  it("dates the judging from the report capsule only for a withheld report: a mismatched report, and a disclosed one without a period, stay unknown", () => {
+    for (const reportInput of [
+      { state: "disclosure_mismatch" },
+      {
+        state: "disclosed",
+        payload: { verdict: "met", source_capsule_id: SOURCE },
+      },
+    ]) {
+      const conversation = buildOutcomeReportModel(
+        synthetic({ reportInput }),
+        options,
+      ).conversations[0]!;
+      expect(conversation.judgedDay).toBe("unknown");
+    }
   });
 
   it("is absent when no transcript is cited", () => {
@@ -925,4 +1339,38 @@ it("never resolves on not_applicable alone", () => {
   expect(b.checkVerdicts.get("policy_compliance")).toBe("met");
   expect(b.checkVerdicts.get("task_resolution")).toBe("not_evaluable");
   expect(model.checkPassCounts.get("task_resolution")).toBe(1);
+});
+
+it("reads the judge's probabilities only as probabilities: a value outside [0, 1] (an exponent) is not one", () => {
+  expect(
+    parseJudgeProbabilities(
+      "jev choice: met (probabilities={'met': 0.89, 'not_met': 0.11}, confidence=0.86).",
+    ),
+  ).toEqual({ probabilities: { met: 0.89, not_met: 0.11 }, confidence: 0.86 });
+  // one out-of-range value makes the whole set unreadable: no partial set
+  expect(
+    parseJudgeProbabilities(
+      "jev choice: met (probabilities={'met': 1.2e2, 'not_met': 2e-3}, confidence=12).",
+    ),
+  ).toEqual({});
+  // a signed exponent is read as the whole token, never truncated to 1
+  expect(
+    parseJudgeProbabilities(
+      "jev choice: met (probabilities={'met': 1e+2, 'not_met': 0.1}, confidence=0.5).",
+    ),
+  ).toEqual({ confidence: 0.5 });
+  expect(
+    parseJudgeProbabilities(
+      "jev choice: met (probabilities={'met': 9e-1, 'not_met': 1E-1}, confidence=1e2).",
+    ),
+  ).toEqual({ probabilities: { met: 0.9, not_met: 0.1 } });
+  expect(parseJudgeProbabilities("x (confidence=1e-2).")).toEqual({
+    confidence: 0.01,
+  });
+  expect(parseJudgeProbabilities("x (confidence=1e+2).")).toEqual({});
+  // a token that is not a whole number (trailing junk) is not read at all
+  expect(
+    parseJudgeProbabilities("probabilities={'met': 0.9x, 'not_met': 0.1}"),
+  ).toEqual({});
+  expect(parseJudgeProbabilities("confidence=0.8abc")).toEqual({});
 });
