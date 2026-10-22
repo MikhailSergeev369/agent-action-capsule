@@ -1479,57 +1479,107 @@ const plain = (value: object): boolean => {
 };
 
 /**
- * A structural copy of JSON-shaped input: arrays and plain objects are copied
- * (own enumerable string keys, each read once), primitives are kept. Keys are
+ * A structural copy of JSON-shaped input: arrays (by index, re-reading
+ * `length` each step) and plain objects (own enumerable string keys, each
+ * read once) are copied, primitives are kept. Every reader verifies and reads
+ * the copy, so an array's own iterator, which JSON never carries, is not
+ * consulted. Keys are
  * defined, not assigned, so a parsed `__proto__` member stays a member. Any
- * other object is kept by reference and left as it is.
+ * other object is kept by reference and left as it is. Iterative, so input
+ * nested beyond the stack is copied and then refused by the verifier, never
+ * raised as a RangeError (#360).
  */
-function ownedCopy<T>(value: T, seen = new Map<object, unknown>()): T {
-  if (value === null || typeof value !== "object" || !plain(value))
-    return value;
-  const done = seen.get(value);
-  if (done !== undefined) return done as T;
-  if (Array.isArray(value)) {
-    const out: unknown[] = [];
-    seen.set(value, out);
-    for (const item of value) out.push(ownedCopy(item, seen));
-    return out as T;
-  }
-  const out: Record<string, unknown> = {};
-  seen.set(value, out);
-  for (const key of Object.keys(value))
-    Object.defineProperty(out, key, {
-      value: ownedCopy((value as Record<string, unknown>)[key], seen),
-      enumerable: true,
-      writable: true,
-      configurable: true,
+function ownedCopy<T>(value: T): T {
+  const seen = new Map<object, unknown>();
+  // One frame per container being copied, depth first: a member's subtree
+  // is copied before the next member is read, so every value, getters
+  // included, is read in the order the recursive copy read it.
+  type Frame =
+    | {
+        readonly source: readonly unknown[];
+        readonly out: unknown[];
+        index: number;
+      }
+    | {
+        readonly source: Record<string, unknown>;
+        readonly out: Record<string, unknown>;
+        readonly keys: readonly string[];
+        index: number;
+      };
+  const frames: Frame[] = [];
+  // The copy of `input`, opening a frame for a container not yet copied.
+  const copyOf = (input: unknown): unknown => {
+    if (input === null || typeof input !== "object" || !plain(input))
+      return input;
+    const done = seen.get(input);
+    if (done !== undefined) return done;
+    if (Array.isArray(input)) {
+      const out: unknown[] = [];
+      seen.set(input, out);
+      frames.push({ source: input, out, index: 0 });
+      return out;
+    }
+    const out: Record<string, unknown> = {};
+    seen.set(input, out);
+    frames.push({
+      source: input as Record<string, unknown>,
+      out,
+      keys: Object.keys(input),
+      index: 0,
     });
-  return out as T;
+    return out;
+  };
+  const root = copyOf(value);
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1]!;
+    if ("keys" in frame) {
+      if (frame.index === frame.keys.length) {
+        frames.pop();
+        continue;
+      }
+      const key = frame.keys[frame.index++]!;
+      Object.defineProperty(frame.out, key, {
+        value: copyOf(frame.source[key]),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    } else {
+      if (frame.index >= frame.source.length) {
+        frames.pop();
+        continue;
+      }
+      frame.out.push(copyOf(frame.source[frame.index++]));
+    }
+  }
+  return root as T;
 }
 
 /**
  * Freeze an object graph the context owns: arrays and plain objects,
- * recursively through data properties (accessors are never invoked). A
+ * through data properties (accessors are never invoked). A
  * {@link ReadonlyMapView} freezes itself and its entries are frozen through
- * it.
+ * it. Iterative, like {@link ownedCopy}.
  */
-function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
-  if (value === null || typeof value !== "object" || seen.has(value))
-    return value;
-  seen.add(value);
-  if (value instanceof ReadonlyMapView) {
-    for (const [key, entry] of value as ReadonlyMapView<unknown, unknown>) {
-      deepFreeze(key, seen);
-      deepFreeze(entry, seen);
+function deepFreeze<T>(value: T): T {
+  const seen = new WeakSet<object>();
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (next === null || typeof next !== "object" || seen.has(next)) continue;
+    seen.add(next);
+    if (next instanceof ReadonlyMapView) {
+      for (const [key, entry] of next as ReadonlyMapView<unknown, unknown>)
+        pending.push(key, entry);
+      continue;
     }
-    return value;
+    if (!plain(next)) continue;
+    Object.freeze(next);
+    for (const descriptor of Object.values(
+      Object.getOwnPropertyDescriptors(next),
+    ))
+      if ("value" in descriptor) pending.push(descriptor.value);
   }
-  if (!plain(value)) return value;
-  Object.freeze(value);
-  for (const descriptor of Object.values(
-    Object.getOwnPropertyDescriptors(value),
-  ))
-    if ("value" in descriptor) deepFreeze(descriptor.value, seen);
   return value;
 }
 
