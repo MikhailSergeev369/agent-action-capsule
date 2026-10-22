@@ -1010,7 +1010,7 @@ it("a resolved conversation counts the criteria its pack judged, not a fixed nin
   );
   open(conv);
   expect(conv.querySelector('[data-why="resolved"]')!.textContent).toContain(
-    "Resolved: 4 criteria met and 0 not applicable. The rule bills a conversation only when all four pass",
+    "Resolved: 4 criteria met and 0 not applicable. The rule bills a conversation only when every criterion that applies passes and at least one is met; not applicable and out of scope (did not arise) count as not applying, never as met.",
   );
   expect(conv.textContent).toContain("take the AND of the four verdicts");
   expect(conv.textContent).not.toContain("nine");
@@ -1028,7 +1028,9 @@ it("a conversation judged on one criterion says so in the singular", async () =>
   expect(conv.querySelector('[data-why="resolved"]')!.textContent).toContain(
     "Resolved: 1 criterion met and 0 not applicable.",
   );
-  expect(conv.textContent).toContain("only when its one criterion passes");
+  expect(conv.textContent).toContain(
+    "every criterion that applies passes and at least one is met",
+  );
   expect(conv.textContent).toContain("take the AND of the one verdict");
 });
 
@@ -1416,4 +1418,56 @@ it("dating: with no case record cited, the calendar keeps the judged day and the
   expect(conv.querySelector("[data-check-it]")).not.toBeNull();
   expect(conv.querySelector("[data-dated]")).toBeNull();
   expect(conv.textContent).not.toContain("Judged and sealed");
+});
+
+it("(ER 4.2) a resolved conversation with an out_of_scope criterion never says it was met or not applicable", async () => {
+  const source = fixture("outcome-report-bundle.json");
+  const resultDoc = ((source.disclosures as Obj).result as Obj)
+    .agent_input as Obj;
+  const claims = resultDoc.claims as Obj[];
+  const refs = [
+    ...new Set(claims.map((c) => c.requirement_ref as string)),
+  ].slice(0, 2);
+  const first = (claims[0]!.id as string).split("::")[0]!;
+  const kept = claims
+    .filter((c) => refs.includes(c.requirement_ref as string))
+    .map((c): Obj => {
+      const mine = (c.id as string).startsWith(`${first}::`);
+      const switched = c.requirement_ref === refs[1];
+      return {
+        ...c,
+        ...(switched ? { out_of_scope_allowed: true } : {}),
+        ...(mine
+          ? {
+              verdict: switched ? "out_of_scope" : "met",
+              sufficiency: "SATISFIED",
+              presentation: { ...(c.presentation as Obj), status: "SATISFIED" },
+            }
+          : {}),
+      };
+    });
+  const buckets = rebuildBuckets(
+    kept.filter((c) => c.verdict !== "out_of_scope"),
+  );
+  buckets.out_of_scope = kept
+    .filter((c) => c.verdict === "out_of_scope")
+    .map((c) => c.id as string);
+  (source.disclosures as Obj).result = {
+    agent_input: {
+      ...resultDoc,
+      claims: kept,
+      aggregate: { ...(resultDoc.aggregate as Obj), buckets },
+    },
+  };
+  const root = await render((await sealEvidenceBundle(source)).bundle);
+  const conv = root.querySelector<HTMLElement>(
+    `[data-drill="resolved"] details.conv[data-conversation="${first}"]`,
+  )!;
+  expect(conv.querySelector(".cwhy")!.textContent).toBe(
+    "1 criterion met or not applicable and 1 out of scope",
+  );
+  open(conv);
+  expect(conv.querySelector('[data-why="resolved"]')!.textContent).toContain(
+    "Resolved: 1 criterion met, 0 not applicable and 1 out of scope. The rule bills a conversation only when every criterion that applies passes and at least one is met; not applicable and out of scope (did not arise) count as not applying, never as met.",
+  );
 });

@@ -115,6 +115,19 @@ function obligationStatus(obligation: ObligationModel): {
   text: string;
 } {
   const exceptions = obligation.rows.reduce((sum, r) => sum + r.notMetCount, 0);
+  // Result v0 section 4.3: when nothing in force was evaluated and some
+  // claims are later, there is no population to have no exceptions in.
+  const evaluated = obligation.rows.reduce(
+    (sum, r) =>
+      sum +
+      r.metCount +
+      r.notMetCount +
+      r.notEvaluableCount +
+      r.outOfScopeCount,
+    0,
+  );
+  if (evaluated === 0 && obligation.rows.some((r) => r.notYetInForceCount > 0))
+    return { cls: "future", text: "Not yet in force" };
   if (obligation.applicability.status === "not stated")
     return exceptions > 0
       ? { cls: "exc", text: `Exceptions noted (${fmt(exceptions)})` }
@@ -191,11 +204,15 @@ function checkItBlock(test: SessionTest): HTMLElement {
         ? "✗ not met"
         : test.verdict === "not_applicable"
           ? "— not applicable"
-          : test.verdict === "failed"
-            ? "✗ failed verification (counted as an exception)"
-            : test.verdict === "unsupported"
-              ? "✗ unsupported: its evidence is not in this bundle (counted as an exception)"
-              : "– not evaluable";
+          : test.verdict === "out_of_scope"
+            ? "— out of scope: did not arise"
+            : test.verdict === "not_yet_in_force"
+              ? "— not yet in force (readiness only, not counted)"
+              : test.verdict === "failed"
+                ? "✗ failed verification (counted as an exception)"
+                : test.verdict === "unsupported"
+                  ? "✗ unsupported: its evidence is not in this bundle (counted as an exception)"
+                  : "– not evaluable";
   head.append(element("span", label));
   head.append(tierBadge(test.tier));
   box.append(head);
@@ -305,6 +322,7 @@ function renderTests(host: HTMLElement, model: ComplianceModel): void {
     el("th", "n", "Population"),
     el("th", "n", "Exceptions"),
     el("th", "n", "Not evaluable"),
+    el("th", "n", "Out of scope"),
     element("th", "Result"),
   );
   thead.append(headRow);
@@ -317,8 +335,11 @@ function renderTests(host: HTMLElement, model: ComplianceModel): void {
       const typeCell = document.createElement("td");
       typeCell.append(tierBadge(row.tier));
       const resultCell = document.createElement("td");
-      const population = model.totalSessions - row.notApplicableCount;
-      if (
+      const population =
+        model.totalSessions - row.notApplicableCount - row.notYetInForceCount;
+      if (population === 0 && row.notYetInForceCount > 0)
+        resultCell.append(statusPill("future", "Not yet in force"));
+      else if (
         population > 0 &&
         row.notEvaluableCount === population &&
         row.notMetCount === 0 &&
@@ -342,12 +363,13 @@ function renderTests(host: HTMLElement, model: ComplianceModel): void {
         el("td", "n", fmt(population)),
         el("td", "n", fmt(row.notMetCount)),
         el("td", "n", fmt(row.notEvaluableCount)),
+        el("td", "n", fmt(row.outOfScopeCount)),
         resultCell,
       );
       tbody.append(tr);
       const drill = document.createElement("tr");
       const drillCell = document.createElement("td");
-      drillCell.colSpan = 7;
+      drillCell.colSpan = 8;
       const sessionIds = [
         ...(row.sessionsByVerdict.get("not_met") ?? []),
         ...(row.sessionsByVerdict.get("not_evaluable") ?? []),

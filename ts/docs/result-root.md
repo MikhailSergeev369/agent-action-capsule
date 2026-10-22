@@ -69,7 +69,7 @@ viewer does not resolve them and says so on the row.
 
 From the root Result, and only from there: the coverage line
 (`evaluated_population`, `excluded_not_applicable`, `unknown_count`), the
-three buckets, and for every claim its `sufficiency`, `verdict`, `tier`,
+buckets (the fourth only when the contract switches it on), and for every claim its `sufficiency`, `verdict`, `tier`,
 `grade`, `type`, presentation carrier and status, and its cited digests.
 
 From the cited records, and only from there: every drill-down -- the
@@ -132,6 +132,24 @@ appears in no bucket`), one in two, or an entry count that is not the
 claim count is a finding from `validateEvidenceResult`, so the Result is
 refused with that error and never rendered. This is what stops "not met:
 none" over a `not_met` claim from reaching the page.
+
+**The fourth verdict and applicability** (`spec/evidence-result-v0.md` §4.2,
+§4.3). `VERDICTS` carries `out_of_scope`; `REQUIRED_BUCKETS` the three
+buckets every aggregate has. The validator refuses an `out_of_scope` claim
+without `out_of_scope_allowed`, on a typed claim, or with carrier status
+`NOT_APPLICABLE`; a fourth bucket present without a switched-on claim, or
+absent with one; two claims of one requirement that disagree on either
+copied fact; and, when a claim is dated, a `generated_at` that is not an RFC
+3339 date-time with an offset or an `applies_from` that is not a calendar
+date. A claim is `later` when `applies_from` is after the UTC date of
+`generated_at` (`laterClaimIds`, `utcDateOf`): it is in no bucket, outside
+`evaluated_population` and `unknown_count`, and counted as
+`coverage.notYetInForce`. The page draws the fourth bucket only when the
+Result carries it, a "not yet in force" list apart from the buckets, each
+later verdict as "(readiness)", and, whenever a claim is dated, "In force as
+of <date>" with the label that the dates and the switch come from the
+contract and are not re-checked here. `ResultClaim.outOfScopeAllowed`,
+`appliesFrom` and `later` carry the copied facts.
 
 **Counts are recomputed from the claims.** Coverage counts evaluations, one
 per claim (`spec/evidence-result-v0.md` §3), so `evaluated_population` and

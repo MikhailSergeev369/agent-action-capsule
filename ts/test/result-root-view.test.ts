@@ -867,3 +867,129 @@ it("the committed sealed Result-root bundle is the seal of the readable fixture"
   );
   expect(bundle).toEqual(fixture("result-root-bundle.sealed.json"));
 });
+
+it("(ER 4.2) draws the fourth bucket only when the contract switches out_of_scope on, never under met", async () => {
+  const source = fixture("result-root-bundle.json");
+  const doc = resultOf(source);
+  const claims = doc.claims as Obj[];
+  claims[0]!.out_of_scope_allowed = true;
+  claims[1]!.out_of_scope_allowed = true;
+  claims[1]!.verdict = "out_of_scope";
+  const buckets = (doc.aggregate as Obj).buckets as Obj;
+  buckets.not_met = [];
+  buckets.out_of_scope = ["claim-2"];
+  const root = await render((await sealEvidenceBundle(source)).bundle);
+  const heading = root.querySelector<HTMLElement>(
+    '[data-bucket-of="outOfScope"]',
+  )!;
+  expect(heading.textContent).toBe("out of scope: 1");
+  expect(
+    root.querySelector('[data-bucket="outOfScope"] [data-claim-ref="claim-2"]'),
+  ).not.toBeNull();
+  expect(
+    root.querySelector('[data-bucket="met"] [data-claim-ref="claim-2"]'),
+  ).toBeNull();
+  expect(root.querySelectorAll("[data-count-mismatch]")).toHaveLength(0);
+  // undated, switched on: the switch is still labelled as copied
+  expect(
+    root.querySelector<HTMLElement>('[data-copied-facts="contract"]')!
+      .textContent,
+  ).toBe(
+    "The out-of-scope switch is copied from the contract, not re-checked here.",
+  );
+
+  // a Result that does not switch it on has no fourth heading
+  const plain = await render(
+    (await sealEvidenceBundle(fixture("result-root-bundle.json"))).bundle,
+  );
+  expect(plain.querySelector('[data-bucket-of="outOfScope"]')).toBeNull();
+});
+
+it("(ER 4.3) lists claims not yet in force apart from the buckets, with the as-of date and the copied-fact label", async () => {
+  const source = fixture("result-root-bundle.json");
+  const doc = resultOf(source);
+  const claims = doc.claims as Obj[];
+  claims[0]!.applies_from = "2026-01-01";
+  claims[1]!.applies_from = "2027-08-02";
+  const aggregate = doc.aggregate as Obj;
+  (aggregate.buckets as Obj).not_met = [];
+  Object.assign(aggregate.coverage as Obj, {
+    evaluated_population: 2,
+    not_yet_in_force: 1,
+  });
+  const root = await render((await sealEvidenceBundle(source)).bundle);
+  const line = root.querySelector<HTMLElement>('[data-coverage="result"]')!;
+  expect(line.textContent).toBe(
+    "coverage: 2 evaluations of 2 requirements · 1 excluded as not applicable · 0 with an unknown result · 1 evaluation not yet in force",
+  );
+  expect(root.querySelectorAll("[data-count-mismatch]")).toHaveLength(0);
+  const asOf = root.querySelector<HTMLElement>("[data-as-of]")!;
+  expect(asOf.dataset.asOf).toBe("2026-09-16");
+  expect(asOf.textContent).toBe(
+    "In force as of 2026-09-16. The dates are copied from the contract, not re-checked here.",
+  );
+  const later = root.querySelector<HTMLElement>(
+    '[data-bucket="notYetInForce"] [data-claim-ref="claim-2"]',
+  )!;
+  expect(later.textContent).toBe(
+    "claim-2 · applies from 2027-08-02 · readiness: not_met",
+  );
+  expect(
+    root.querySelector('[data-bucket="notMet"] [data-claim-ref="claim-2"]'),
+  ).toBeNull();
+  const verdict = root.querySelector<HTMLElement>(
+    '[data-claim-row="claim-2"] [data-later="true"]',
+  )!;
+  expect(verdict.textContent).toBe("not_met (readiness)");
+});
+
+it("(ER 4.3) a later claim whose evidence is not in the bundle reads unsupported in the later list, never its stated verdict", async () => {
+  const source = fixture("result-root-bundle.json");
+  const doc = resultOf(source);
+  const claims = doc.claims as Obj[];
+  claims[0]!.applies_from = "2027-08-02";
+  (claims[0]!.evidence as Obj[])[0]!.digest = ABSENT_ID;
+  const aggregate = doc.aggregate as Obj;
+  (aggregate.buckets as Obj).met = [];
+  Object.assign(aggregate.coverage as Obj, {
+    evaluated_population: 2,
+    not_yet_in_force: 1,
+  });
+  const root = await render((await sealEvidenceBundle(source)).bundle);
+  const item = root.querySelector<HTMLElement>(
+    '[data-bucket="notYetInForce"] [data-claim-ref="claim-1"]',
+  )!;
+  expect(item.textContent).toBe(
+    "claim-1 · applies from 2027-08-02 · readiness: unsupported",
+  );
+  expect(item.className).toBe("claim-unsupported");
+});
+
+it("(ER 4.3) a later Close that failed verification is listed failed, in the failed count and the later list, never its stated verdict", async () => {
+  const source = fixture("result-root-close-bundle.json");
+  const header = ((source.disclosures as Obj)["close-b"] as Obj)
+    .agent_input as Obj;
+  (header.links as Obj[])[0]!.type = "rebuts";
+  const doc = resultOf(source);
+  const close = (doc.claims as Obj[]).find((c) => c.id === "close-1")!;
+  close.applies_from = "2099-01-01";
+  const aggregate = doc.aggregate as Obj;
+  const buckets = aggregate.buckets as Obj;
+  for (const key of Object.keys(buckets))
+    buckets[key] = (buckets[key] as string[]).filter((id) => id !== "close-1");
+  const coverage = aggregate.coverage as Obj;
+  coverage.evaluated_population = (coverage.evaluated_population as number) - 1;
+  coverage.not_yet_in_force = 1;
+  const root = await render((await sealEvidenceBundle(source)).bundle);
+  const page = root.querySelector<HTMLElement>('[data-page="result"]')!;
+  expect(
+    page.querySelector<HTMLElement>('[data-bucket-of="failed"]')!.textContent,
+  ).toBe("failed: 1");
+  const item = page.querySelector<HTMLElement>(
+    '[data-bucket="notYetInForce"] [data-claim-ref="close-1"]',
+  )!;
+  expect(item.textContent).toBe(
+    "close-1 · applies from 2099-01-01 · readiness: failed",
+  );
+  expect(item.className).toBe("claim-failed");
+});

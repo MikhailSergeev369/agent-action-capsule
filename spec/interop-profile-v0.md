@@ -62,7 +62,7 @@ and the discovery properties (§11.4).
 | CB | Controller Binding v0 | `spec/controller-binding-v0.md` | the binding record, its properties, and when a binding applies to a pair (§6.7.4) |
 | BA | `draft-mih-agent-bilateral-attestation` | -02 (`spec/draft-mih-agent-bilateral-attestation-02.md`) | the requesting and performing parties, and acknowledgment as receipt without agreement |
 | EL | `draft-mih-agent-evidence-layer` | -00 (`spec/draft-mih-agent-evidence-layer-00.md`) | what a Receipt proves, witnesses, the link shape and its closed vocabulary, and the `cites`, `acknowledges`, `supersedes` and `rebuts` links |
-| EC | Evidence Contract v0 schema | `capsule_engine/schemas/evidence-contract-v0.json` in the capsule-engine repository at commit `fd43d4329ea31d69e9bdd0a79f23f013c3615219`, SHA-256 of the file `6d10d5eb97e15421db0ab922b5f6d1f0a2e9f453fb64e52fb45306ba029ad480` | the contract and every member and value of it (§11.3); the eight-value status, its four-value projection, and per-requirement handling of missing and conflicting evidence |
+| EC | Evidence Contract v0 schema | `capsule_engine/schemas/evidence-contract-v0.json` in the capsule-engine repository at commit `773ae9e96285e4442cab8139923b1479b103e14c`, SHA-256 of the file `6b969610e6f120a9f5b98555aa5045644c62665f14075bb83fb9e78bab21b770` | the contract and every member and value of it (§11.3); the eight-value status, its four-value projection, and per-requirement handling of missing and conflicting evidence |
 | CLL | `draft-mih-scitt-checkpointed-local-log` | -01 as posted: <https://www.ietf.org/archive/id/draft-mih-scitt-checkpointed-local-log-01.txt>, SHA-256 of that file `2ef340206e6ba4260b84ba265f794ab9756aefa7cdaeac98e95cea646cfb678f` | the checkpoint and its claims, the peak-list commitment, the log identity, and the inclusion and consistency claims, behind the `cll-*` material kinds (§6.2.1) |
 | A2A | Agent2Agent (A2A) Protocol Specification | v1.0.1, tag commit `3303592588e388e62e0f69f701af531d2f4e3991`: <https://github.com/a2aproject/A2A/blob/v1.0.1/docs/specification.md>, SHA-256 of that file `627ccfe6ffb1be2c56811c3dcc18780deb419f41cdc98248095c939b2d9dc9cb`, with `specification/a2a.proto` at the same tag, SHA-256 `e195bf96ab630c69797851970203e1b2b6b19528f2e9803b7d904b91a5104016` | the Agent Card extension declaration and default modes, the `Message`, `Part`, `Task`, `Artifact` and `TaskArtifactUpdateEvent` objects, task states and multi-turn continuation, `ListTasks` scoping, ProtoJSON bytes, Agent Card signing, and the `A2A-Version` and `A2A-Extensions` service parameters, behind the A2A binding (§11.4.4) |
 | MCP | Model Context Protocol specification | 2026-07-28, as published at <https://modelcontextprotocol.io/specification/2026-07-28>; source `docs/specification/2026-07-28/server/tools.mdx` (SHA-256 `ed550806a58eb7744b858fb9f26001aa5e55dac9e2babe88317cc81d9d4c490d`), `docs/specification/2026-07-28/basic/index.mdx` (SHA-256 `03586b10e3214c55478293f1199fffb0bbf95bbef5df3d6a8378e860697bd63f`), `docs/specification/2026-07-28/changelog.mdx` (SHA-256 `b327e576f4c96b34e92f338f8ffefc35e13d0e953ab76bdb3aab342d104c8e53`) and `schema/2026-07-28/schema.ts` (SHA-256 `742750af0bb8c716e7030c4977c992b55d1adc4407e9e66997db5846baedc2cd`) at commit `3778656b2e0ba6725035e816fe3085374cbaa736` of `github.com/modelcontextprotocol/modelcontextprotocol` | `tools/list`, `tools/call`, tool definitions, `structuredContent`, `content`, `isError`, `_meta`, `input_required` results and their retries, the error classes, `x-mcp-header` and the Streamable HTTP request headers, behind the MCP binding (§11.4.5); not the tasks extension |
@@ -1007,8 +1007,10 @@ Where each row comes from:
 
 ### 8.2 Invariants of the mapping
 
-1. A verifier MUST NOT emit `met` or `not_met` for any status that projects to anything but
-   `SATISFIED` [RES §1].
+1. A verdict pairs with its sufficiency as RES §1 states: `SATISFIED` with `met`, `not_met`, or
+   `out_of_scope` where the requirement allows it (§8.3); every other projection with
+   `not_evaluable` only. A verifier MUST NOT emit any other pair, or a verdict outside those four
+   [RES §1, §4.2].
 2. A verification failure never yields `SATISFIED` with `met` for a requirement that depends on
    the failed property [ER §4.6; RES §1].
 3. A refusal is never mapped as an absence, and an absence is never mapped as a refusal
@@ -1038,6 +1040,12 @@ The claim's fields [RES §4, §5] are filled as follows:
 - `contract_ref` is the `<contract_id>@<version>` of the contract evaluated [RES §1]. The
   contract-digest binding of an accepted contract is §11.1.
 - `tier` and `grade` are set by the evaluator as RES §1 defines. This profile does not set them.
+- The claim copies two facts from the requirement it evaluates [RES §4.2, §4.3; P-61]:
+  `out_of_scope_allowed: true` when the requirement is a native outcome or native obligation
+  (§11.3.2) carrying `out_of_scope_allowed: true`, and `applies_from` equal to the requirement's
+  `clause.effective_from` when it carries one, whatever its shape. The same switch name on any
+  other shape grants nothing. A verdict `out_of_scope` on a requirement without the switch breaks
+  invariant 1 (§8.2).
 
 The status in a `not_evaluable` claim's carrier tells the requester what kind of follow-up could
 change the result: a corrected request, a different subject, or a later one. The claim itself
@@ -2130,6 +2138,7 @@ The two native shapes share one set of members (`$defs/requirementNativeBase`) [
 | `clause_ref` | OPTIONAL | text | a free-form citation of the clause or section the requirement derives from |
 | `clause` | OPTIONAL; REQUIRED in native obligation | object, below | the structured, versioned citation of that clause |
 | `epistemic_type` | OPTIONAL | one epistemic type (§11.3.3) | the kind of claim the requirement's evidence is |
+| `out_of_scope_allowed` | OPTIONAL | `true` only (`const`) | the requirement allows the verdict `out_of_scope`; absent means it does not. Only the two native shapes carry it; an open stub that carries the name gains nothing (§8.3) |
 
 `window` (`$defs/window`) is closed [EC]. `duration` is REQUIRED: non-empty text, an ISO 8601
 duration such as `P7D` [EC]. `cure` and `grace` are OPTIONAL, each text or `null`: the cure and
@@ -2225,8 +2234,9 @@ that a contract never carries. They are the outputs of evaluating a contract aga
   `NOT_FOUND`, `NOT_COMMITTED`, `WITHHELD`, `CONTRADICTED`, `NOT_APPLICABLE`, `UNKNOWN`;
 - `contractResult`: its four-value projection, `SATISFIED`, `GAP`, `INSUFFICIENT`, `UNKNOWN`, as §8
   states it;
-- `verdict`: `met`, `not_met`, `not_evaluable`, never `met` or `not_met` unless the projection is
-  `SATISFIED` [RES §1].
+- `verdict`: `met`, `not_met`, `not_evaluable`, `out_of_scope`; anything but `not_evaluable` only
+  when the projection is `SATISFIED`, and `out_of_scope` only where the requirement allows it
+  [RES §1, §4.2].
 
 #### 11.3.7 How a contract feeds this profile
 
@@ -2263,6 +2273,13 @@ a re-evaluation gives new claims [RES §1; P-47]:
 - Within one contract version, the `id` of each requirement MUST be unique, so that a claim's
   `requirement_ref` names one requirement [P-47]. A verifier that finds two requirements with one
   `id` MUST NOT evaluate that contract version, and emits no claim under it [P-47].
+- A `clause.effective_from` MUST name a calendar date. The schema checks only its pattern [EC], so
+  `2027-02-30` is valid against it. A verifier that finds one that does not name a calendar date
+  MUST NOT evaluate that contract version, and emits no claim under it [P-62].
+- The facts a claim copies from a requirement (§8.3) are checked against the contract only by the
+  party that evaluates it. This revision defines no operation that checks another party's Result
+  against a contract document; a relying party that needs the copies to hold re-evaluates the
+  contract [P-63].
 - The claim's `contract_ref` is the contract's (above), its `requirement_ref` is the requirement's
   `id`, and its sufficiency and verdict, and the status kept in its carrier (§8.3), come from §8
   [RES §4; P-17].
@@ -2742,6 +2759,9 @@ checks them. Each case pins:
 Each case also cites the sections its expected values come from. The contract document
 validates against the Evidence Contract v0 schema pinned as EC (§11.3), and the corpus records
 that pin's SHA-256.
+A second set, `vectors/interop-profile-v0-requirement-facts/`, has its own contract, pins and
+cases, from the same generator with `--set requirement-facts`; it shows the requirement facts that
+§8.3 copies into each requirement block.
 
 | Cases | What they show | Sections |
 |---|---|---|
@@ -3055,6 +3075,12 @@ a later draft revision.
   that two keys have distinct controllers. A controller binding [CB] cannot give it, because it
   shows the opposite: a binding that applies gives `FAIL`. Until a revision registers evidence of
   distinct controllers, a verifier reports `FAIL` or `NOT_CHECKED` only.
+- **P-61** A claim copies the requirement's `out_of_scope` switch (native shapes only) and its
+  `clause.effective_from` as `out_of_scope_allowed` and `applies_from` (§8.3; RES §4.2, §4.3).
+- **P-62** A contract version with a `clause.effective_from` that names no calendar date is not
+  evaluated and gives no claims, as for a repeated `id` (P-47; §11.3.7).
+- **P-63** Open: no operation checks another party's Result against its contract document, so a
+  producer's copied facts (P-61) are checkable only by re-evaluation (§11.3.7).
 
 ## References
 

@@ -138,6 +138,7 @@ const VERDICT_TEXT: Record<DrawnVerdict, string> = {
   failed: "failed verification",
   unsupported: "unsupported",
   not_applicable: "not applicable",
+  out_of_scope: "out of scope",
 };
 
 /** `tau2:airline:task-20:trial-0` reads "task 20"; any other id is shown whole. */
@@ -240,7 +241,7 @@ function pill(verdict: DrawnVerdict | "resolved" | "missed"): HTMLElement {
   const tone =
     verdict === "met" || verdict === "resolved"
       ? "ok"
-      : verdict === "not_applicable"
+      : verdict === "not_applicable" || verdict === "out_of_scope"
         ? "na"
         : verdict === "not_evaluable"
           ? "ne"
@@ -288,6 +289,14 @@ function countWord(n: number): string {
  * judged it on: "all four criteria met or not applicable". A conversation
  * has at least one criterion: the terms come from its own claims.
  */
+// One sentence for the billing rule, whatever the criteria (Result v0
+// section 4.2: out_of_scope is never met).
+const RESOLUTION_RULE =
+  "The rule bills a conversation only when every criterion that applies passes and at least one is met; not applicable and out of scope (did not arise) count as not applying, never as met.";
+
+const countOf = (n: number, one: string, many: string): string =>
+  `${n} ${n === 1 ? one : many}`;
+
 function allCriteriaMet(n: number): string {
   if (n === 1) return "its one criterion met or not applicable";
   return `all ${countWord(n)} criteria met or not applicable`;
@@ -309,6 +318,9 @@ function renderConversation(
   const na = conversation.criteria.filter(
     (c) => c.verdict === "not_applicable",
   );
+  const outOfScope = conversation.criteria.filter(
+    (c) => c.verdict === "out_of_scope",
+  );
 
   const summary = el("summary", "conv-s");
   summary.append(el("span", "cid", caseLabel(conversation.conversationId)));
@@ -318,7 +330,9 @@ function renderConversation(
       "span",
       "cwhy",
       resolved
-        ? `${allCriteriaMet(conversation.criteria.length)}${na.length > 0 ? ` (${na.length} not applicable)` : ""}`
+        ? outOfScope.length === 0
+          ? `${allCriteriaMet(conversation.criteria.length)}${na.length > 0 ? ` (${na.length} not applicable)` : ""}`
+          : `${countOf(conversation.criteria.length - outOfScope.length, "criterion", "criteria")} met or not applicable and ${outOfScope.length} out of scope`
         : `missed on: ${[...misses, ...(misses.length === 0 ? unjudged : [])]
             .map((c) => criterionLabel(model, c.checkId, c.criterionId).label)
             .join(", ")}`,
@@ -513,11 +527,16 @@ function conversationBody(
   why.dataset.why = resolved ? "resolved" : "missed";
   if (resolved) {
     const met = conversation.criteria.filter((c) => c.verdict === "met").length;
+    const outOfScope = conversation.criteria.filter(
+      (c) => c.verdict === "out_of_scope",
+    );
     const n = conversation.criteria.length;
     why.append(
       element(
         "li",
-        `Resolved: ${met} ${met === 1 ? "criterion" : "criteria"} met and ${na.length} not applicable. The rule bills a conversation only when ${n === 1 ? "its one criterion passes" : `all ${countWord(n)} pass`}, and not applicable counts as passing.`,
+        outOfScope.length === 0
+          ? `Resolved: ${met} ${met === 1 ? "criterion" : "criteria"} met and ${na.length} not applicable. ${RESOLUTION_RULE}`
+          : `Resolved: ${met} ${met === 1 ? "criterion" : "criteria"} met, ${na.length} not applicable and ${outOfScope.length} out of scope. ${RESOLUTION_RULE}`,
       ),
     );
   } else {
@@ -809,6 +828,12 @@ function renderLines(
       model.notApplicableCount,
       fmtCount(model.notApplicableCount),
     ],
+    [
+      "out-of-scope",
+      "Criterion judgments out of scope",
+      model.outOfScopeCount,
+      fmtCount(model.outOfScopeCount),
+    ],
   ];
   for (const [key, label, count, shown] of lines) {
     const tr = document.createElement("tr");
@@ -825,7 +850,11 @@ function renderLines(
             ? model.conversations.filter((c) =>
                 c.criteria.some((cr) => cr.verdict === "not_applicable"),
               )
-            : undefined;
+            : key === "out-of-scope"
+              ? model.conversations.filter((c) =>
+                  c.criteria.some((cr) => cr.verdict === "out_of_scope"),
+                )
+              : undefined;
     if (behind !== undefined && behind.length > 0)
       desc.append(
         drill(

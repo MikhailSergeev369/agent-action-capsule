@@ -114,7 +114,9 @@ export interface ConversationCriterion {
    * excludes such a criterion from `claims[]` entirely -- see
    * `aggregate.coverage.excluded_not_applicable` -- never emits a claim with
    * that verdict), so there is no claim object to carry for it here either.
-   * Every other verdict always has one.
+   * Every other verdict always has one, `out_of_scope` included (Result v0
+   * section 4.2: a judged claim, counted on its own, never as not
+   * applicable).
    */
   readonly claim?: ResultClaim;
   /** The claim's own drawn verdict: `failed`/`unsupported` never read as `met` (see `drawnVerdict`). `not_applicable` carries no claim (see `claim` above) -- a reader is still shown WHICH criterion, just not its rationale/tier/evidence, none of which the Result v0 document carries for an excluded criterion. */
@@ -122,7 +124,8 @@ export interface ConversationCriterion {
     | ConversationVerdict
     | "failed"
     | "unsupported"
-    | "not_applicable";
+    | "not_applicable"
+    | "out_of_scope";
   readonly rationale?: string;
   /** Present only when the cited evaluation-report/v1 record carries one; never inferred from rationale text. */
   readonly reasonCode?: string;
@@ -445,6 +448,8 @@ export interface OutcomeReportModel {
   readonly addedCount: number;
   /** Criterion judgments read as not_applicable (see `ConversationCriterion.verdict`) across every conversation -- never folded into `missedCount`, consistent with the roll-up's own rule that not_applicable counts as passing. */
   readonly notApplicableCount: number;
+  /** Criterion judgments read as out_of_scope (Result v0 section 4.2), counted apart from not_applicable. */
+  readonly outOfScopeCount: number;
   readonly capsuleId: string;
 }
 
@@ -466,9 +471,7 @@ function parseClaimGrouping(
 }
 
 /** The claim's verdict as a reader may draw it: never `met` for a failed or unsupported claim. */
-function drawnVerdict(
-  claim: ResultClaim,
-): ConversationVerdict | "failed" | "unsupported" {
+function drawnVerdict(claim: ResultClaim): ConversationCriterion["verdict"] {
   if (claim.failed) return "failed";
   if (claim.support === "unsupported") return "unsupported";
   return claim.verdict;
@@ -790,6 +793,7 @@ function rollUp(
     | "failed"
     | "unsupported"
     | "not_applicable"
+    | "out_of_scope"
   )[],
 ): ConversationVerdict {
   // Absent is never pass: a check or conversation with no claims at all
@@ -806,7 +810,9 @@ function rollUp(
   // not_applicable counts as passing beside a met ("does not apply" is still
   // an answer), but never alone: a check or conversation whose criteria are
   // ALL not_applicable had nothing checked, so it is not_evaluable, never a
-  // vacuous met -- the same rule as evidencebook-skills' roll-up.
+  // vacuous met -- the same rule as evidencebook-skills' roll-up. An
+  // out_of_scope judgment ("did not arise") rolls up the same way, and is
+  // counted on its own (outOfScopeCount), never as not_applicable.
   if (!verdicts.some((v) => v === "met")) return "not_evaluable";
   return "met";
 }
@@ -1012,6 +1018,10 @@ function groupClaims(
           });
           continue;
         }
+        // Result v0 section 4.3: a claim not yet in force is readiness only,
+        // outside the population; this deprecated card draws no criterion
+        // for it, unless it failed verification: a failure is still drawn.
+        if (claim.later && !claim.failed) continue;
         const judgment = reportPayload(result.records, claim);
         const rationale = judgment ? asString(judgment.rationale) : undefined;
         const reasonCode = judgment
@@ -1571,11 +1581,14 @@ export function buildOutcomeReportModel(
         .length,
     );
   const resolvedCount = conversations.filter((c) => c.verdict === "met").length;
-  const notApplicableCount = conversations.reduce(
-    (sum, c) =>
-      sum + c.criteria.filter((cr) => cr.verdict === "not_applicable").length,
-    0,
-  );
+  const countOf = (verdict: ConversationCriterion["verdict"]): number =>
+    conversations.reduce(
+      (sum, c) =>
+        sum + c.criteria.filter((cr) => cr.verdict === verdict).length,
+      0,
+    );
+  const notApplicableCount = countOf("not_applicable");
+  const outOfScopeCount = countOf("out_of_scope");
   return {
     terms,
     options,
@@ -1594,6 +1607,7 @@ export function buildOutcomeReportModel(
     heldCount: held,
     addedCount: added,
     notApplicableCount,
+    outOfScopeCount,
     capsuleId: result.capsuleId,
   };
 }
