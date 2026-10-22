@@ -286,7 +286,9 @@ describe("a tampered bundle", () => {
       vector("minimum-necessary", "bundle-mismatch", "input.json").bundle,
     );
     expect(page).not.toContain("disclosures");
-    expect(failed).toEqual(["disclosures"]);
+    // The strict checkpoint claim fails too: the checkpoint's JSON copy
+    // states no log_id (checkpoint_field_missing:log_id).
+    expect(failed).toEqual(["checkpoint-signature", "disclosures"]);
   });
 
   it("an edited countersignature moves the countersignature check out of the page list", async () => {
@@ -295,7 +297,7 @@ describe("a tampered bundle", () => {
     );
     const [entry] = bundle.countersignatures as Obj[];
     const signature = entry!.signature as string;
-    const { page, failed } = await show({
+    const { page, failed, root } = await show({
       ...bundle,
       countersignatures: [
         {
@@ -306,6 +308,11 @@ describe("a tampered bundle", () => {
     });
     expect(page).not.toContain("countersignatures");
     expect(failed).toEqual(["countersignatures"]);
+    // A countersignature is not one of the bundle's own checks: the banner
+    // scopes its words to those, beside a failed countersignature line.
+    expect(root.querySelector("[data-verdict]")?.textContent).toMatch(
+      /^Bundle verification incomplete: none of the bundle's checks failed, /u,
+    );
   });
 
   it("a moved membership entry moves the membership check out of the page list", async () => {

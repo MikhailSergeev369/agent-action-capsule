@@ -1,5 +1,7 @@
 import type {
   BundleVerificationResult,
+  StrictBundleResult,
+  StrictClaimName,
   ExtensionInterpreterId,
   ExtensionResult,
 } from "./bundle.js";
@@ -386,6 +388,12 @@ export interface CheckListInputs {
   readonly stamps?: readonly CountersignatureStamp[];
   /** True when the rendered page module checked the signers it cites. */
   readonly citedSigners?: boolean;
+  /**
+   * The strict result this runtime reached (the context's `strict`): with
+   * it, the producer signatures and the checkpoint signature were checked
+   * here.
+   */
+  readonly strict?: StrictBundleResult;
 }
 
 export const CHECKED_ON_THIS_PAGE = "Checked on this page";
@@ -415,7 +423,8 @@ export const VERIFICATION_CHECK_WORDS: Readonly<
   range:
     "That no record is missing from the stretch of the log this file covers.",
   membership: "That each record bound to a log position sits at that position.",
-  "checkpoint-signature": "The signature on the log's checkpoint.",
+  "checkpoint-signature":
+    "The signature on the log's checkpoint, and the fields it signs.",
   disclosures:
     "Each disclosed value against the digest its record committed to.",
   countersignatures:
@@ -431,9 +440,9 @@ export const VERIFICATION_CHECK_WORDS: Readonly<
   "countersignature-receipts": "The receipt carried with a countersignature.",
 });
 
-/** Added to the checkpoint line when the page passed the bundle without it. */
+/** Added to the checkpoint line when the claims resting on it passed without it. */
 export const CHECKPOINT_NOT_CHECKED_NOTE =
-  "This page could not check it, and shows the bundle as passing without it.";
+  "This page could not check it, so the range and membership checks rest on a checkpoint the producer asserted.";
 
 /** The words a list item shows for `id` under `list`. */
 export function verificationCheckWords(
@@ -511,7 +520,13 @@ export function verificationCheckLists(
     if (stopped || checkpointInvalid) {
       outcome.set("membership", "notChecked");
     } else {
-      ran("membership", coverageStatement(verified).status === "established");
+      // A record bound to no log position fails per-record membership: the
+      // rows still render, but the page's verdict calls it a failure.
+      ran(
+        "membership",
+        coverageStatement(verified).status === "established" &&
+          unboundRecordIds(verified).length === 0,
+      );
     }
     if (checkpointInvalid) outcome.set("checkpoint-signature", "failed");
     else if (signed) {
@@ -574,6 +589,46 @@ export function verificationCheckLists(
   )
     outcome.set("countersignature-receipts", "notChecked");
 
+  // The strict checks ran here: the lists say how the producer signatures,
+  // the checkpoint, the proof claims and the witness receipts went, not only
+  // that the bundle carries them.
+  const strict = inputs.strict;
+  if (strict?.kindOk === true) {
+    const claim = (name: StrictClaimName) =>
+      strict.claims.find((entry) => entry.name === name);
+    const signatures = claim("signatures");
+    if (signatures?.status === "pass") ran("producer-signatures", true);
+    else if (
+      signatures?.findings.some((f) =>
+        f.startsWith("producer_signature_invalid:"),
+      )
+    )
+      ran("producer-signatures", false);
+    const checkpoint = claim("checkpoint");
+    if (checkpoint?.status === "pass") ran("checkpoint-signature", true);
+    else if (checkpoint?.status === "fail") ran("checkpoint-signature", false);
+    // A proof claim the strict verdict failed is never listed as checked:
+    // records bound to no log position fail per-record membership.
+    if (claim("interval_coverage")?.status === "fail") ran("range", false);
+    if (claim("per_record_membership")?.status === "fail")
+      ran("membership", false);
+    // The receipts in `checkpoint.witnesses`, as the strict verdict read
+    // them: checked only when every one verified.
+    const witnesses = strict.witnesses;
+    if (witnesses?.status === "fail") ran("witness-receipts", false);
+    else if (
+      witnesses?.status === "pass" &&
+      witnesses.receipts.every((r) => r.status === "pass")
+    )
+      ran("witness-receipts", true);
+    else if (
+      witnesses !== null &&
+      witnesses !== undefined &&
+      !witnesses.findings.includes("witness_receipt_absent")
+    )
+      outcome.set("witness-receipts", "notChecked");
+  }
+
   const pick = (which: "page" | "failed" | "notChecked") =>
     VERIFICATION_CHECK_IDS.filter((id) => outcome.get(id) === which);
   const failed = pick("failed");
@@ -581,11 +636,13 @@ export function verificationCheckLists(
     page: pick("page"),
     failed,
     notChecked: pick("notChecked"),
-    // The note says the page shows the bundle as passing: true only when
-    // the page's own verdict (bundleVerified, the banner's) passes and no
-    // check on this page failed.
+    // The note says the range and membership checks passed on a checkpoint
+    // the producer asserted: true only when the page's own checks
+    // (bundleVerified) pass, no check on this page failed and the
+    // checkpoint line is in the not-checked list.
     passedWithoutCheckpoint:
       passedWithoutCheckpoint &&
+      outcome.get("checkpoint-signature") === "notChecked" &&
       failed.length === 0 &&
       bundleVerified(verified),
   };

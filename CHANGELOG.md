@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- TypeScript viewer: the banner states the strict verdict (`verifyBundle`'s `strict`), the
+  outcome a full verifier reports, and no longer says "Bundle verification passed" for a bundle
+  that verifier calls INCOMPLETE. It sets `data-verdict` (`valid`, `incomplete`, `invalid`) and
+  `data-checkpoint` (`verified`, `unverified`, `invalid`, `absent`); `data-verify` is still the
+  render gate. "Passed" is kept for `valid`. `incomplete` names what the page did not check, and
+  coverage or membership resting on a checkpoint the page did not authenticate is labelled
+  `checkpoint_unverified`, relative to a producer-asserted checkpoint (Evidence Bundle,
+  completeness). Records bound to no log position now read "Bundle verification failed: N of M
+  records are uncheckpointed …" (INVALID, as every verifier says) where the banner said "passed";
+  their rows still render. With no Ed25519 there is no strict verdict, and that alone is
+  never a failure: a bundle that passes the page's own checks, with every record bound to a log
+  position, reads `incomplete`. The verification page's
+  check lists now list the producer signatures and the checkpoint signature as checked or failed
+  when the page checked them. `VerifiedBundleContext` gains `strict`; `CheckListInputs` gains
+  `strict`, and the lists also read the strict proof claims and the witness receipts in
+  `checkpoint.witnesses`. `CHECKPOINT_NOT_CHECKED_NOTE`'s text changed: it no longer says the page
+  shows the bundle as passing. A styled banner gets `oi-banner-incomplete` (a new
+  `OUTCOME_REPORT_CSS` rule, so a page that hashes that stylesheet for its CSP gets a new hash), and
+  an unsigned bundle no longer gets `oi-banner-ok`. Building a context now also runs the strict
+  checks: one Ed25519 verification per record, the checkpoint and the witness receipts. Tests
+  carried over from #197 (Steven Mih). (#196)
 - Evidence Result v0: `Claim.evidence` now has `minItems: 1`, matching §1's Traceability rule that
   `evidence[]` is REQUIRED on every claim. A Result with a claim that cites nothing no longer
   validates. §2 says a claim about a `recorded_absence` cites the absence record by digest, and
