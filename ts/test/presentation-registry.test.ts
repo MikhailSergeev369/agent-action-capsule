@@ -29,6 +29,8 @@ import {
   type PresentationResolver,
   REFERENCE_PRESENTATION_RUNTIME,
 } from "../src/presentation-registry.js";
+import { VERIFICATION_BANNER_LINES } from "../src/verification-page.js";
+import { derivedFixture } from "./helpers/derived-fixtures.js";
 import { sealEvidenceBundle } from "./helpers/sealed-bundle.js";
 
 type Obj = Record<string, unknown>;
@@ -91,6 +93,8 @@ function spyModule(
     buildThrows?: boolean;
     renderThrows?: boolean;
     chrome?: string;
+    /** Rewrites the core's banner from inside render (contract section 3). */
+    tamper?: (banner: HTMLElement) => void;
   } = {},
 ): Spy {
   const calls: string[] = [];
@@ -115,6 +119,10 @@ function spyModule(
         out.dataset.testModule = (model as { id: string }).id;
         out.textContent = `module ${m.id}`;
         host.L1.append(out);
+        if (behaviour.tamper !== undefined)
+          behaviour.tamper(
+            host.L0.querySelector<HTMLElement>("[data-verify]")!,
+          );
         if (behaviour.renderThrows) throw new Error(`${m.id} render failed`);
       },
     },
@@ -377,11 +385,251 @@ describe("resolution and rendering (spec section 4.3)", () => {
     ).not.toBeNull();
     // The chrome class the module set is discarded with its content.
     const banner = page.querySelector<HTMLElement>("[data-verify]")!;
-    expect(banner.dataset.verify).toBe("verified");
+    expect(banner.dataset.verify).toBe("incomplete");
     expect(banner.className).toBe("");
     expect(page.lastElementChild).toBe(
       page.querySelector('[data-page="verification"]'),
     );
+  });
+
+  // The banner's words and attributes are the core's: a module that writes
+  // them, softens them or removes the banner is discarded for the refusal,
+  // as one that throws is. Only setChromeClass may restyle it.
+  it.each([
+    [
+      "rewrites the banner's line",
+      (b: HTMLElement) => {
+        b.textContent = "✓ Unchanged since it was sealed";
+      },
+    ],
+    [
+      "sets data-verify",
+      (b: HTMLElement) => {
+        b.dataset.verify = "verified";
+      },
+    ],
+    [
+      "removes the details line",
+      (b: HTMLElement) => {
+        b.nextElementSibling?.remove();
+      },
+    ],
+    [
+      "draws a second banner of its own before the core's",
+      (b: HTMLElement) => {
+        const fake = document.createElement("p");
+        fake.dataset.verify = "verified";
+        fake.textContent = "✓ Unchanged since it was sealed";
+        b.before(fake);
+      },
+    ],
+    [
+      "hides the banner",
+      (b: HTMLElement) => {
+        b.hidden = true;
+      },
+    ],
+    [
+      "moves the banner after its own rows",
+      (b: HTMLElement) => {
+        const root = b.parentElement!;
+        const detail = b.nextElementSibling!;
+        root.append(b, detail);
+      },
+    ],
+    [
+      "wraps the banner's words in a hidden child",
+      (b: HTMLElement) => {
+        const span = document.createElement("span");
+        span.hidden = true;
+        span.textContent = b.textContent;
+        b.replaceChildren(span);
+      },
+    ],
+    [
+      "puts its own row before the banner",
+      (b: HTMLElement) => {
+        const row = document.createElement("p");
+        row.textContent = "a row first";
+        b.parentElement!.prepend(row);
+      },
+    ],
+    [
+      "puts bare words before the banner",
+      (b: HTMLElement) => {
+        b.parentElement!.prepend("✓ Verified by the module");
+      },
+    ],
+    [
+      "removes the banner",
+      (b: HTMLElement) => {
+        b.remove();
+      },
+    ],
+  ] as const)(
+    "a module that %s is discarded for the refusal, and the banner is redrawn",
+    async (_, tamper) => {
+      const tampering = spyModule(manifest(), { tamper, chrome: "oi" });
+      const registry = new PresentationRegistry();
+      registry.register(tampering.module);
+      const page = await render(producerKeyBundle(), registry);
+      expect(page.querySelectorAll("[data-test-module]")).toHaveLength(0);
+      expect(
+        page.querySelector('[data-refusal="presentation-failed"]'),
+      ).not.toBeNull();
+      const banners = page.querySelectorAll<HTMLElement>("[data-verify]");
+      expect(banners).toHaveLength(1);
+      expect(banners[0]!.dataset.verify).toBe("incomplete");
+      // The page's own line, whatever the module wrote.
+      expect(banners[0]!.textContent).toBe(
+        VERIFICATION_BANNER_LINES.incompleteNoList,
+      );
+      expect(banners[0]!.className).toBe("");
+      expect(page.querySelector("[data-banner-detail]")).not.toBeNull();
+    },
+  );
+
+  it("a module that only restyles the banner through setChromeClass renders", async () => {
+    const styling = spyModule(manifest(), { chrome: "oi" });
+    const registry = new PresentationRegistry();
+    registry.register(styling.module);
+    const page = await render(producerKeyBundle(), registry);
+    expect(page.querySelectorAll("[data-test-module]")).toHaveLength(1);
+    expect(page.querySelector("[data-refusal]")).toBeNull();
+  });
+
+  it("a render that rejects after another render on the same root finished leaves that page, never its own or the other's checking", async () => {
+    let fail!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      fail = resolve;
+    });
+    const failing = spyModule(manifest());
+    const registry = new PresentationRegistry();
+    registry.register({
+      ...failing.module,
+      buildModel: async () => {
+        await gate;
+        throw new Error("late model failure");
+      },
+    });
+    const root = document.createElement("main");
+    const first = renderEvidenceGraph(producerKeyBundle(), root);
+    const second = renderEvidenceGraph(producerKeyBundle(), root, undefined, {
+      registry,
+    });
+    await first;
+    fail();
+    await expect(second).rejects.toThrow("late model failure");
+    const banners = root.querySelectorAll<HTMLElement>("[data-verify]");
+    expect(banners).toHaveLength(1);
+    expect(banners[0]!.dataset.verify).toBe("incomplete");
+    expect(root.querySelector('[data-page="verification"]')).not.toBeNull();
+  });
+
+  it("a module that puts a row before the producer's header is discarded too", async () => {
+    const headed = manifest({
+      requires: {
+        bundle_kind: "evidence-bundle/v2",
+        extensions: { required: ["presentation/v1"] },
+      },
+    });
+    // The fixture is a report/v1 bundle, which the default forbids exclude.
+    delete (headed as unknown as Obj).forbids;
+    const before = spyModule(headed, {
+      tamper: (b) => {
+        const row = document.createElement("p");
+        row.textContent = "a row first";
+        b.parentElement!.prepend(row);
+      },
+    });
+    const registry = new PresentationRegistry();
+    registry.register(before.module);
+    const page = await render(
+      await derivedFixture("week-bundle-presentation.json"),
+      registry,
+    );
+    expect(before.calls).toContain("render");
+    expect(page.firstElementChild?.getAttribute("data-presentation")).toBe(
+      "header",
+    );
+    expect(
+      page.querySelector('[data-refusal="presentation-failed"]'),
+    ).not.toBeNull();
+  });
+
+  it("two renders on one root that both reject leave no checking behind, whichever rejects first", async () => {
+    const gates: (() => void)[] = [];
+    const lateFailure = (): PresentationRegistry => {
+      const registry = new PresentationRegistry();
+      const gate = new Promise<void>((resolve) => gates.push(resolve));
+      registry.register({
+        ...spyModule(manifest()).module,
+        buildModel: async () => {
+          await gate;
+          throw new Error("late model failure");
+        },
+      });
+      return registry;
+    };
+    const root = document.createElement("main");
+    root.append("untouched");
+    const first = renderEvidenceGraph(producerKeyBundle(), root, undefined, {
+      registry: lateFailure(),
+    });
+    const second = renderEvidenceGraph(producerKeyBundle(), root, undefined, {
+      registry: lateFailure(),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    gates[0]!();
+    await expect(first).rejects.toThrow("late model failure");
+    gates[1]!();
+    await expect(second).rejects.toThrow("late model failure");
+    expect(root.querySelector('[data-verify="checking"]')).toBeNull();
+  });
+
+  it("a render that rejects while another on the same root is still checking puts that render's checking back", async () => {
+    let failSecond!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      failSecond = resolve;
+    });
+    let finishFirst!: () => void;
+    const held = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    const slow = new PresentationRegistry();
+    slow.register({
+      ...spyModule(manifest()).module,
+      buildModel: async () => {
+        await held;
+        return { id: "org.example.view/v0" };
+      },
+    });
+    const failing = new PresentationRegistry();
+    failing.register({
+      ...spyModule(manifest()).module,
+      buildModel: async () => {
+        await gate;
+        throw new Error("late model failure");
+      },
+    });
+    const root = document.createElement("main");
+    const first = renderEvidenceGraph(producerKeyBundle(), root, undefined, {
+      registry: slow,
+    });
+    const second = renderEvidenceGraph(producerKeyBundle(), root, undefined, {
+      registry: failing,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    failSecond();
+    await expect(second).rejects.toThrow("late model failure");
+    // The first render is still checking, and the page says so.
+    expect(
+      root.querySelector<HTMLElement>("[data-verify]")?.dataset.verify,
+    ).toBe("checking");
+    finishFirst();
+    await first;
+    expect(root.querySelector('[data-verify="checking"]')).toBeNull();
+    expect(root.querySelectorAll("[data-verify]")).toHaveLength(1);
   });
 
   it("a module whose model cannot be built rejects before anything is drawn (as a malformed Result root always has)", async () => {

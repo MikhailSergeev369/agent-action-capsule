@@ -99,8 +99,13 @@ import {
   FULL_VERIFIER_LINE,
   NOT_CHECKED_ON_THIS_PAGE,
   RECEIPT_GRADE_DISPLAY,
+  UNVERIFIED_BUNDLE_REFUSAL,
+  VERIFICATION_BANNER_LINES,
+  VERIFICATION_CHECK_TECHNICAL_NAMES,
+  verificationCheckLists,
   verificationCheckWords,
   type VerificationCheckLists,
+  type VerifyState,
   type CheckSummary,
   type CompletenessStatement,
   type CoverageStatement,
@@ -178,7 +183,8 @@ type BannerCheckpoint = "verified" | "unverified" | "invalid" | "absent";
 interface BannerWords {
   readonly verdict: BannerVerdict;
   readonly checkpoint: BannerCheckpoint;
-  readonly text: string;
+  /** The details line under the banner, naming each finding; "" for none. */
+  readonly detail: string;
 }
 
 // Each claim's name in the banner's words.
@@ -220,14 +226,16 @@ function notShownWords(claim: StrictClaim, records: number): string {
 }
 
 /**
- * The banner's verdict, checkpoint state and words, from the strict result
- * alone (the full verifier's three outcomes). It says "passed" only for a
- * `valid` verdict. When interval coverage or per-record membership carries
+ * The banner's verdict, checkpoint state and details line, from the strict
+ * result alone (the full verifier's three outcomes). The banner's own line
+ * is fixed per state (VERIFICATION_BANNER_LINES); this details line names
+ * what was not checked or what failed, with the verifier's finding names.
+ * When interval coverage or per-record membership carries
  * `checkpoint_unverified`, it says they are relative to a producer-asserted
  * checkpoint (Evidence Bundle, completeness). Without a strict result (no
  * Ed25519 here) no signature was checked, so a bundle whose rows render is
  * at most `incomplete`. A bundle refused by the page's own checks is
- * `invalid` and its banner keeps its one line: the refusal follows it.
+ * `invalid` with no details line: the refusal follows the banner.
  */
 function bannerWords(
   bundle: unknown,
@@ -277,9 +285,9 @@ function bannerWords(
     return {
       verdict: "invalid",
       checkpoint,
-      text: "Bundle verification failed",
+      detail: "",
     };
-  const uncheckpointed = `Bundle verification failed: ${coverage.uncheckpointed} of ${recordsWord(coverage.total)} are uncheckpointed (bound to no log position), so per-record membership fails.`;
+  const uncheckpointed = `${coverage.uncheckpointed} of ${recordsWord(coverage.total)} are uncheckpointed (bound to no log position), so per-record membership fails.`;
   const sentences: string[] = [];
   let verdict: BannerVerdict;
   if (strict === undefined) {
@@ -302,26 +310,23 @@ function bannerWords(
       ];
       sentences.push(
         carried.length > 0
-          ? `Bundle verification incomplete: none of the bundle's checks failed, but this page cannot check signatures, so ${carried.join(" and ")} could not be checked.`
+          ? `This page cannot check signatures, so ${carried.join(" and ")} could not be checked.`
           : checkpoint === "verified"
-            ? "Bundle verification incomplete: none of the bundle's checks failed, but no record is signed."
-            : "Bundle verification incomplete: none of the bundle's checks failed, but neither the checkpoint nor any record is signed.",
+            ? "No record is signed."
+            : "Neither the checkpoint nor any record is signed.",
       );
     }
   } else {
     verdict = strict.verdict.toLowerCase() as BannerVerdict;
-    if (verdict === "valid") sentences.push("Bundle verification passed");
-    else if (verdict === "incomplete") {
+    if (verdict === "incomplete") {
       const notChecked = strict.claims
         .filter((entry) => entry.status !== "pass" || entry.findings.length > 0)
         .map((entry) => notShownWords(entry, strict.records.length))
         .filter((words) => words !== "");
-      sentences.push(
-        notChecked.length > 0
-          ? `Bundle verification incomplete: none of the bundle's checks failed, but this page did not check ${notChecked.join("; ")}.`
-          : "Bundle verification incomplete: none of the bundle's checks failed, but not every check was run.",
-      );
-    } else {
+      // With nothing to name, the banner's own line says it all.
+      if (notChecked.length > 0)
+        sentences.push(`This page did not check ${notChecked.join("; ")}.`);
+    } else if (verdict === "invalid") {
       // The rows render (the bundle passed the page's own checks, which a
       // bundle refused by its kind never does) although the verdict is
       // invalid: say what failed, before any row.
@@ -384,9 +389,7 @@ function bannerWords(
           );
       }
       sentences.push(
-        unboundOnly
-          ? uncheckpointed
-          : `Bundle verification failed: ${named.join("; ")}.`,
+        unboundOnly ? uncheckpointed : `What failed: ${named.join("; ")}.`,
       );
     }
   }
@@ -418,22 +421,24 @@ function bannerWords(
       `${names[0]!.toUpperCase()}${names.slice(1)} ${unanchored.length === 1 ? "is" : "are"} checkpoint_unverified: relative to a producer-asserted checkpoint ${checkpoint === "absent" ? "that is not signed" : "this page could not authenticate"}.`,
     );
   }
-  return { verdict, checkpoint, text: sentences.join(" ") };
+  return { verdict, checkpoint, detail: sentences.join(" ") };
 }
 
 // The banner is drawn from the verification result alone and precedes every
 // row in the DOM; a bundle that fails the page's own checks gets the refusal
 // line here and no rows at all, so a reader never meets a payload before the
-// verdict on the bundle that carries it. `data-verdict` is the strict
-// verdict (`valid`, `incomplete` or `invalid`) and `data-checkpoint` what
-// became of the checkpoint signature; `data-verify` stays the render gate
-// (whether rows are shown), which also admits a bundle whose only failure is
-// records bound to no log position.
+// verdict on the bundle that carries it. `data-verify` is the state the
+// reader is told (presentation contract section 6.2): `verified` only for a
+// `valid` verdict, so no consumer reads an incomplete or failed page as
+// verified. `data-verdict` is the strict verdict and `data-checkpoint` what
+// became of the checkpoint signature. The banner's line is fixed per state;
+// the details line under it carries the findings.
 function renderVerificationBanner(
   root: HTMLElement,
   context: VerifiedBundleContext,
   rendered: boolean,
   coverage: { uncheckpointed: number; total: number },
+  notCheckedListDrawn: boolean,
 ): HTMLElement {
   const words = bannerWords(
     context.bundle,
@@ -442,25 +447,51 @@ function renderVerificationBanner(
     rendered,
     coverage,
   );
-  const banner = element("p", words.text);
-  banner.dataset.verify = rendered ? "verified" : "failed";
+  const state: VerifyState = !rendered
+    ? "failed"
+    : words.verdict === "valid"
+      ? "verified"
+      : words.verdict === "incomplete"
+        ? "incomplete"
+        : "failed";
+  const line = !rendered
+    ? VERIFICATION_BANNER_LINES.refused
+    : state === "incomplete" && !notCheckedListDrawn
+      ? VERIFICATION_BANNER_LINES.incompleteNoList
+      : VERIFICATION_BANNER_LINES[state];
+  const banner = element("p", line);
+  banner.dataset.verify = state;
   banner.dataset.verdict = words.verdict;
   banner.dataset.checkpoint = words.checkpoint;
   banner.dataset.uncheckpointed = String(coverage.uncheckpointed);
   root.append(banner);
+  if (words.detail !== "") {
+    const detail = element("p", words.detail);
+    detail.dataset.bannerDetail = "";
+    root.append(detail);
+  }
   if (rendered) return banner;
-  const refusal = element(
-    "p",
-    "This bundle did not verify. Its records, rows and payloads are not shown; the verification page below lists which checks failed.",
-  );
+  const refusal = element("p", UNVERIFIED_BUNDLE_REFUSAL);
   refusal.dataset.refusal = "unverified-bundle";
   root.append(refusal);
   return banner;
 }
 
+/**
+ * Draw the `checking` state into `root`, replacing what it held: the banner
+ * alone, with no verdict and no row, until the checks finish. Returns that
+ * banner.
+ */
+export function renderChecking(root: HTMLElement): HTMLElement {
+  const banner = element("p", VERIFICATION_BANNER_LINES.checking);
+  banner.dataset.verify = "checking";
+  root.replaceChildren(banner);
+  return banner;
+}
+
 /** The words a page says when this viewer cannot verify the bundle at all. */
 export const UNABLE_TO_VERIFY_LINES = {
-  banner: "Unable to verify in this viewer",
+  banner: VERIFICATION_BANNER_LINES.unable,
   reason:
     "This viewer cannot compute the SHA-256 digests the checks need, so nothing was checked and no records are shown. This is not a failed check: the file may well be valid.",
   command: "To check this file, run:",
@@ -729,10 +760,11 @@ function renderCompletenessStatement(
     "payloads mode",
     completeness?.payloadsMode ?? "unstated",
   );
-  appendValue(
-    details,
-    "suppressed fields",
-    completeness?.suppressedFields ?? [],
+  // A list, never printed as `[]`: nothing suppressed reads "none".
+  const suppressed = completeness?.suppressedFields ?? [];
+  details.append(
+    element("dt", "suppressed fields"),
+    element("dd", suppressed.length === 0 ? "none" : suppressed.join(", ")),
   );
   host.append(details);
 }
@@ -741,7 +773,7 @@ function renderChecks(
   host: HTMLElement,
   checks: readonly CheckSummary[],
 ): void {
-  host.append(element("h4", "The ten checks"));
+  host.append(element("h4", "Each check, by its technical name"));
   const list = element("ol");
   checks.forEach((check) => {
     const item = element("li");
@@ -793,6 +825,9 @@ function renderExtensionTable(
     const tr = element("tr");
     tr.dataset.extensionId = row.id;
     tr.dataset.integrity = row.integrity;
+    // Which interpreter applied the block: a technical name, kept off the
+    // reader's line.
+    if (row.interpreter !== undefined) tr.dataset.interpreter = row.interpreter;
     tr.dataset.semantics =
       row.refusal !== undefined
         ? "refused"
@@ -836,14 +871,24 @@ function renderCheckLists(
     const list = element("ul");
     list.dataset.checks = which;
     for (const id of ids) {
-      const item = element(
-        "li",
+      // The line in plain words, then the name a full verifier's report
+      // uses for the same check, so a reader can match the two.
+      const item = element("li");
+      const words = element(
+        "span",
         verificationCheckWords(
           id,
           which === "not-checked" ? "notChecked" : which,
           lists,
         ),
       );
+      words.dataset.checkLine = "";
+      const name = element(
+        "small",
+        `Technical name: ${VERIFICATION_CHECK_TECHNICAL_NAMES[id]}`,
+      );
+      name.dataset.checkName = "";
+      item.append(words, " ", name);
       item.dataset.check = id;
       list.append(item);
     }
@@ -876,9 +921,11 @@ function renderCheckLists(
 // either way, and it stays the last element of the rendering.
 //
 // `applied` is the set of extension interpreters this rendering ran; an
-// extension row says "interpreted by" only for one of them. `refused` is
+// extension row says a module shows it only for one of them. `refused` is
 // every module this runtime refused that matched (page, then section).
-async function renderVerificationPage(
+// `stamps` is the countersignature classification the banner was drawn
+// from, so the two never disagree.
+function renderVerificationPage(
   root: HTMLElement,
   context: VerifiedBundleContext,
   styled: boolean,
@@ -886,8 +933,9 @@ async function renderVerificationPage(
   refused: readonly PresentationRefusal[],
   citedSigners: boolean,
   verifierHint: string | undefined,
-): Promise<void> {
-  const { bundle, verification: verified, countersigners } = context;
+  stamps: readonly CountersignatureStamp[],
+): void {
+  const { bundle, verification: verified } = context;
   const section = element("section");
   section.dataset.page = "verification";
   let page = section;
@@ -898,22 +946,23 @@ async function renderVerificationPage(
     section.append(page);
   }
   page.append(element("h2", "Verification"));
-  const stamps = await classifyCountersignatures(
-    context.countersignatures.map((entry) => entry.value),
-    verified.bundleDigest,
-    declaredProducerKeys(bundle),
-    countersigners,
-  );
   const model = buildVerificationPageModel(bundle, verified, applied, refused, {
     stamps,
     citedSigners,
     ...(context.strict === undefined ? {} : { strict: context.strict }),
   });
+  // The digests, the completeness statement and the checks by their
+  // technical names: for a reader matching this page to a full verifier's
+  // report, so they sit in one closed disclosure. The plain-words lists
+  // below carry the same results.
+  const technical = element("details");
+  technical.dataset.technicalDetails = "";
+  technical.append(element("summary", "Technical details"));
   const summary = element("dl");
   appendValue(summary, "bundle digest", model.bundleDigest ?? "uncomputable");
   appendValue(summary, "checkpoint root", model.checkpointRoot ?? "absent");
   appendValue(summary, "checkpoint size", model.checkpointSize ?? "absent");
-  page.append(summary);
+  technical.append(summary);
   renderReceipts(page, model.receipts);
   if (model.selfWitnessed) {
     // A checkpoint with no transparency-service receipt was witnessed by
@@ -932,8 +981,9 @@ async function renderVerificationPage(
     model.coverage,
   );
   renderStamps(page, stamps);
-  renderCompletenessStatement(page, model.completeness);
-  renderChecks(page, model.checks);
+  renderCompletenessStatement(technical, model.completeness);
+  renderChecks(technical, model.checks);
+  page.append(technical);
   renderExtensions(page, model.extensions, model.presentationRefusals);
   renderCheckLists(page, model.checkLists, verifierHint);
   page.append(element("p", model.verifyIndependentlyLine));
@@ -2166,15 +2216,62 @@ export async function renderEvidenceGraph(
     );
     return;
   }
-  // Verify first. Nothing reaches the DOM until the verification result is
-  // in hand, and no module is consulted for a bundle that did not verify.
-  const context = isVerifiedBundleContext(input)
-    ? countersigners === undefined
-      ? input
-      : withCountersigners(input, countersigners)
-    : await buildVerifiedBundleContext(input, {
+  if (isVerifiedBundleContext(input))
+    return renderVerifiedContext(
+      countersigners === undefined
+        ? input
+        : withCountersigners(input, countersigners),
+      root,
+      options,
+    );
+  // Verify first. Until the verification result is in hand the page shows
+  // `checking` and nothing else, and no module is consulted for a bundle
+  // that did not verify. A render that rejects while its own `checking` is
+  // still shown puts back what `root` held, so it still draws nothing. When
+  // another render on the same root is still checking, its `checking` is
+  // put back instead; another render's `checking` that has ended never is.
+  const before = [...root.childNodes];
+  const checking = renderChecking(root);
+  const active = checkingRenders.get(root) ?? new Set<HTMLElement>();
+  checkingRenders.set(root, active);
+  active.add(checking);
+  try {
+    await renderVerifiedContext(
+      await buildVerifiedBundleContext(input, {
         ...(countersigners === undefined ? {} : { countersigners }),
-      });
+      }),
+      root,
+      options,
+    );
+  } catch (err) {
+    if (checking.parentNode === root) {
+      const other = [...active].find((node) => node !== checking);
+      if (other !== undefined) root.replaceChildren(other);
+      else
+        root.replaceChildren(
+          ...before.filter(
+            (node) =>
+              !(
+                node.nodeType === 1 &&
+                (node as Element).getAttribute("data-verify") === "checking"
+              ),
+          ),
+        );
+    }
+    throw err;
+  } finally {
+    active.delete(checking);
+  }
+}
+
+// The `checking` banners of the renders still verifying, by root.
+const checkingRenders = new WeakMap<HTMLElement, Set<HTMLElement>>();
+
+async function renderVerifiedContext(
+  context: VerifiedBundleContext,
+  root: HTMLElement,
+  options: RenderEvidenceGraphOptions,
+): Promise<void> {
   const { bundle, verification } = context;
   const verified = bundleVerified(verification);
   const registry = options.registry ?? defaultRegistry;
@@ -2244,12 +2341,90 @@ export async function renderEvidenceGraph(
     total: Array.isArray(records) ? records.length : 0,
   };
 
+  const stamps = await classifyCountersignatures(
+    context.countersignatures.map((entry) => entry.value),
+    verification.bundleDigest,
+    declaredProducerKeys(bundle),
+    context.countersigners,
+  );
+  // The banner points at the not-checked list only when the page draws one.
+  // The page's lists also read `citedSigners`, which depends on the module,
+  // but that adds only to the checked list, never to this one.
+  const notCheckedListDrawn =
+    verificationCheckLists(bundle, verification, {
+      stamps,
+      ...(context.strict === undefined ? {} : { strict: context.strict }),
+    }).notChecked.length > 0;
+
   const drawFrame = (): HTMLElement => {
     root.replaceChildren();
     renderPresentationHeader(root, bundle);
-    return renderVerificationBanner(root, context, verified, coverage);
+    return renderVerificationBanner(
+      root,
+      context,
+      verified,
+      coverage,
+      notCheckedListDrawn,
+    );
   };
   let banner = drawFrame();
+  // The banner and its details line are the core's (contract sections 3 and
+  // 6.2). A module that, while it renders, changes their words, structure or
+  // any attribute but the class setChromeClass sets, hides or moves them,
+  // puts anything before them but the core's own header, or draws a second
+  // banner, is discarded for the refusal like one that throws.
+  const snapshot = (parts: readonly HTMLElement[]): string =>
+    JSON.stringify(
+      parts.map((part) => [
+        // The structure too: the words wrapped in a hidden child keep the
+        // same textContent.
+        Array.from(part.childNodes, (node) => [
+          node.nodeType,
+          node.textContent,
+        ]),
+        part
+          .getAttributeNames()
+          .filter((name) => name !== "class")
+          .sort()
+          .map((name) => [name, part.getAttribute(name)]),
+      ]),
+    );
+  const frameOf = (top: HTMLElement) => {
+    const detail = top.nextElementSibling;
+    const parts = [
+      top,
+      ...(detail?.hasAttribute("data-banner-detail")
+        ? [detail as HTMLElement]
+        : []),
+    ];
+    // The core's own header when it drew one, else nothing: the banner is
+    // the root's first element after it.
+    return {
+      parts,
+      header: top.previousElementSibling,
+      words: snapshot(parts),
+    };
+  };
+  let frame = frameOf(banner);
+  const assertFrameIntact = (): void => {
+    const [top, detail] = frame.parts as [HTMLElement, HTMLElement?];
+    const banners = root.querySelectorAll(
+      "[data-verify], [data-banner-detail]",
+    );
+    if (
+      banners.length !== frame.parts.length ||
+      frame.parts.some((part, i) => banners[i] !== part) ||
+      // Nodes, not elements: a bare text node before the banner is words
+      // too. The core draws no text node at the root.
+      root.firstChild !== (frame.header ?? top) ||
+      top.previousSibling !== frame.header ||
+      (frame.header !== null && frame.header.parentNode !== root) ||
+      (detail !== undefined && detail.previousElementSibling !== top) ||
+      top.parentNode !== root ||
+      snapshot(frame.parts) !== frame.words
+    )
+      throw new Error("a module altered the verification banner");
+  };
   if (refused.length > 0)
     root.dataset.presentationRefused = refused.map((r) => r.id).join(" ");
   else delete root.dataset.presentationRefused;
@@ -2273,10 +2448,12 @@ export async function renderEvidenceGraph(
         host,
         presentationServices(context),
       );
+      assertFrameIntact();
     } catch {
       // Everything the module wrote is discarded; no other module is tried.
       chrome = undefined;
       banner = drawFrame();
+      frame = frameOf(banner);
       refusal = "presentation-failed";
     }
   }
@@ -2305,6 +2482,7 @@ export async function renderEvidenceGraph(
         },
         presentationServices(context),
       );
+      assertFrameIntact();
     } catch {
       chrome = undefined;
       banner = drawFrame();
@@ -2329,7 +2507,7 @@ export async function renderEvidenceGraph(
         for (const id of BUILTIN_MODULE_INTERPRETERS[ran.module.manifest.id] ??
           [])
           applied.add(id);
-  await renderVerificationPage(
+  renderVerificationPage(
     root,
     context,
     chrome === OUTCOME_CHROME,
@@ -2337,5 +2515,6 @@ export async function renderEvidenceGraph(
     refused,
     refusal === undefined && citesCheckedSigners(selected),
     options.verifierHint,
+    stamps,
   );
 }
