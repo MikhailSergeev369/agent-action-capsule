@@ -5,6 +5,7 @@ import type {
   ExtensionInterpreterId,
   ExtensionResult,
 } from "./bundle.js";
+import { isProducerSelection } from "./bundle.js";
 import {
   bundleVerified,
   presentationRefusalLine,
@@ -619,6 +620,16 @@ export function verificationCheckLists(
         passedWithoutCheckpoint = !stopped && range.status === "pass";
       } else outcome.set("checkpoint-signature", "page");
     }
+  } else if (isProducerSelection(verified)) {
+    // A producer selection (bundle.ts readSelection): no interval to check;
+    // each record's own inclusion proof, read against the signed
+    // checkpoint, unless that checkpoint could not be authenticated here.
+    const membership = verified.perRecordMembership;
+    if (membership.status === "withheld")
+      outcome.set("membership", "notChecked");
+    else ran("membership", membership.status === "pass");
+    if (signed && membership.findings.includes("checkpoint_unverified"))
+      outcome.set("checkpoint-signature", "notChecked");
   }
 
   const disclosed = verified.disclosures.filter((d) => d.status !== "withheld");

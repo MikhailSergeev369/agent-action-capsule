@@ -2,7 +2,7 @@ import type {
   BundleVerificationResult,
   VerifiedBundleContext,
 } from "./bundle.js";
-import { verifiedPayload } from "./bundle.js";
+import { isProducerSelection, verifiedPayload } from "./bundle.js";
 import { readCompliancePresentation } from "./compliance-presentation.js";
 import { CONTRACT_REPORT_KIND, readContractReport } from "./contract-report.js";
 import type { DisclosureState } from "./evidence-graph.js";
@@ -308,11 +308,18 @@ function membershipProvenOrUnbound(result: BundleVerificationResult): boolean {
   );
 }
 
+// A producer-selected Bundle, as the context reads it (bundle.ts
+// readSelection, only when the strict verdict is not INVALID): no interval
+// to check, and each record's own inclusion proof read against the signed
+// checkpoint, gated like any Bundle's membership. Where the checkpoint
+// cannot be authenticated (the browser build) the strict checks withhold
+// those proofs, so the page refuses the Bundle there.
 /** The viewer's verification gate: what "verified" means for resolution. */
 export function bundleVerified(result: BundleVerificationResult): boolean {
+  const selected = isProducerSelection(result);
   return (
     result.graphClosure.status === "pass" &&
-    result.intervalCoverage.status === "pass" &&
+    (selected || result.intervalCoverage.status === "pass") &&
     membershipProvenOrUnbound(result) &&
     Object.values(result.capsuleResults).every((capsule) => capsule.ok) &&
     result.disclosures.every(
