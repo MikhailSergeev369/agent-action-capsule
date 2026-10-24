@@ -1,13 +1,14 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import vm from "node:vm";
+import { build } from "esbuild";
 import { beforeAll, describe, expect, it } from "vitest";
 
-// The built browser runtime, run the way a page outside a secure context
-// runs it: a fresh context with no `crypto` global, so no SubtleCrypto for
-// the record digests (json.ts) or the MMR proofs (@action-state-group/cll's
-// browser condition, which esbuild bundles here).
+// The browser entry (src/browser.ts, bundled here as a page bundles it), run
+// the way a page outside a secure context runs it: a fresh context with no
+// `crypto` global, so no SubtleCrypto for the record digests (json.ts) or the
+// MMR proofs (@action-state-group/cll's browser condition, which esbuild
+// bundles here).
 
 const tsRoot = resolve(import.meta.dirname, "..");
 
@@ -27,11 +28,9 @@ type Runtime = {
   ): { checks: Check[]; bundleDigest?: string };
 };
 
+let source: string;
+
 function runtime(withCrypto: boolean): Runtime {
-  const source = readFileSync(
-    resolve(tsRoot, "dist", "evidence-graph.iife.js"),
-    "utf8",
-  );
   const sandbox: Record<string, unknown> = {
     TextEncoder,
     TextDecoder,
@@ -64,13 +63,18 @@ async function checks(eg: Runtime): Promise<Check[]> {
     .checks.map(({ name, status }) => ({ name, status }));
 }
 
-describe("browser IIFE without a crypto global", () => {
-  beforeAll(() => {
-    execFileSync("npm", ["run", "emitter:iife"], {
-      cwd: tsRoot,
-      stdio: "inherit",
+describe("the browser entry without a crypto global", () => {
+  beforeAll(async () => {
+    const result = await build({
+      entryPoints: [resolve(tsRoot, "src", "browser.ts")],
+      bundle: true,
+      format: "iife",
+      globalName: "EvidenceGraph",
+      platform: "browser",
+      write: false,
     });
-  });
+    source = result.outputFiles[0]!.text;
+  }, 60_000);
 
   it("passes the same ten checks as with WebCrypto", async () => {
     const expected = await checks(runtime(true));
