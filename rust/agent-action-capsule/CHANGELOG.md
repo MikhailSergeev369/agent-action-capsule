@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- `verify::verify` does bounded work on hostile numbers. The float and
+  unsafe-integer walk writes a path only for a number that fails, where it
+  used to build one for every member it visited. It reports at most 64
+  `float_in_digest_field` and 64 `unsafe_integer_in_digest_field` findings,
+  and each quotes at most 256 characters of its path, then `...`. Verdicts do
+  not change, but on a record with more than 64 of either, Rust now lists
+  fewer findings than the Go and Python verifiers, which list every one. A
+  1 MB record holding 250,000 floats under a 500 KB key used to keep about
+  125 GB of path text (250,000 paths of 500 KB each), and now verifies in a
+  few times the memory of one parsed copy. `canonical::float_paths` and
+  `unsafe_int_paths` still return every path, in full.
+
 ## 0.4.0
 
 - Evidence Bundle producer (feature `strict`): `bundle::build_evidence_bundle`
