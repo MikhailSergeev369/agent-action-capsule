@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Strict Bundle verification (feature `strict`): `verify_bundle_strict`'s
+  `checkpoint` claim also holds the completeness certificate's `log_id`, when
+  stated (a `null` counts as stated), to the signed log identifier, and
+  reports `checkpoint_field_mismatch:log_id` once when it differs, whatever
+  the checkpoint's own copy says. A producer-selected Bundle whose certificate
+  names another log was INCOMPLETE and is now INVALID (#380, the strict
+  vectors `neg-producer-selected-certificate-log-id`,
+  `neg-producer-selected-both-log-ids` and
+  `neg-producer-selected-certificate-log-id-null`).
+- Witness receipts: a `checkpoint.witnesses` entry is malformed unless every
+  member is present, `ts_url`, `entry_hash` and `receipt_b64` are non-empty
+  strings, and `receipt_b64` is canonical standard base64. An entry with every
+  member and a string `ts_url` that fails one of the new checks (an empty
+  `ts_url`, an empty or non-string `entry_hash`, or an empty, non-string or
+  non-canonical `receipt_b64`) was read as a receipt. It was withheld when no
+  usable key checked it (no directory row, a row without a usable key, or a
+  stub), and an empty or non-string `entry_hash` beside a rekor or scrapi
+  receipt that verified passed, since only the cll binding reads it. In each
+  case the Bundle stayed VALID. It now fails as
+  `witness_receipt_malformed:<index>`, with or without a row (#386, the strict
+  vectors `neg-witness-malformed-member-no-row`,
+  `neg-witness-malformed-members` and `neg-witness-malformed-shapes`).
+
 ## 0.4.1
 
 - `verify::verify` does bounded work on hostile numbers. The float and
