@@ -109,7 +109,7 @@ export interface ConversationCriterion {
   readonly checkId: string;
   readonly criterionId: string;
   /**
-   * Absent only for `verdict: "not_applicable"`: Evidence Result v0's Verdict
+   * Absent only for `verdict: "not_applicable"` or `"no_claim"`: Evidence Result v0's Verdict
    * enum has no not_applicable value (evidencebook-skills' result_v0.py
    * excludes such a criterion from `claims[]` entirely -- see
    * `aggregate.coverage.excluded_not_applicable` -- never emits a claim with
@@ -119,12 +119,21 @@ export interface ConversationCriterion {
    * applicable).
    */
   readonly claim?: ResultClaim;
-  /** The claim's own drawn verdict: `failed`/`unsupported` never read as `met` (see `drawnVerdict`). `not_applicable` carries no claim (see `claim` above) -- a reader is still shown WHICH criterion, just not its rationale/tier/evidence, none of which the Result v0 document carries for an excluded criterion. */
+  /**
+   * The claim's own drawn verdict: `failed`/`unsupported` never read as `met`
+   * (see `drawnVerdict`). `not_applicable` and `no_claim` carry no claim (see
+   * `claim` above) -- a reader is still shown WHICH criterion, just not its
+   * rationale/tier/evidence, none of which the Result v0 document carries for
+   * a criterion it has no claim for. `no_claim` is a gap: a missing claim
+   * the Result's exclusions do not account for (see `groupClaims`), never
+   * passing and never not applicable.
+   */
   readonly verdict:
     | ConversationVerdict
     | "failed"
     | "unsupported"
     | "not_applicable"
+    | "no_claim"
     | "out_of_scope";
   readonly rationale?: string;
   /** Present only when the cited evaluation-report/v1 record carries one; never inferred from rationale text. */
@@ -450,7 +459,29 @@ export interface OutcomeReportModel {
   readonly notApplicableCount: number;
   /** Criterion judgments read as out_of_scope (Result v0 section 4.2), counted apart from not_applicable. */
   readonly outOfScopeCount: number;
+  /** Criteria with no claim that the Result's exclusions do not account for (see `ConversationCriterion.verdict`): gaps, each also counted where it rolls up, as not_evaluable. */
+  readonly noClaimCount: number;
+  /**
+   * Requirements of the cited Evidence Contract the run did not cover (Result
+   * v0 section 3, `requirements_covered`), as `<checkId>.<criterionId>`
+   * refs: not run. They are in no conversation, no count and no roll-up.
+   * Empty when the Result does not list what it covered, or when the bundle
+   * cites no contract record to name the others.
+   */
+  readonly notRun: readonly string[];
   readonly capsuleId: string;
+}
+
+/** `<checkId>.<criterionId>` split at its first dot; undefined without one. */
+function criterionRef(
+  requirementRef: string,
+): { checkId: string; criterionId: string } | undefined {
+  const dot = requirementRef.indexOf(".");
+  if (dot === -1) return undefined;
+  return {
+    checkId: requirementRef.slice(0, dot),
+    criterionId: requirementRef.slice(dot + 1),
+  };
 }
 
 function parseClaimGrouping(
@@ -460,14 +491,9 @@ function parseClaimGrouping(
   | undefined {
   const sep = claim.id.indexOf(CLAIM_ID_SEPARATOR);
   if (sep === -1) return undefined;
-  const conversationId = claim.id.slice(0, sep);
-  const dot = claim.requirementRef.indexOf(".");
-  if (dot === -1) return undefined;
-  return {
-    conversationId,
-    checkId: claim.requirementRef.slice(0, dot),
-    criterionId: claim.requirementRef.slice(dot + 1),
-  };
+  const split = criterionRef(claim.requirementRef);
+  if (split === undefined) return undefined;
+  return { conversationId: claim.id.slice(0, sep), ...split };
 }
 
 /** The claim's verdict as a reader may draw it: never `met` for a failed or unsupported claim. */
@@ -793,6 +819,7 @@ function rollUp(
     | "failed"
     | "unsupported"
     | "not_applicable"
+    | "no_claim"
     | "out_of_scope"
   )[],
 ): ConversationVerdict {
@@ -806,7 +833,10 @@ function rollUp(
     )
   )
     return "not_met";
-  if (verdicts.some((v) => v === "not_evaluable")) return "not_evaluable";
+  // A missing claim nothing accounts for (no_claim) is a gap: unjudged, so
+  // never passing.
+  if (verdicts.some((v) => v === "not_evaluable" || v === "no_claim"))
+    return "not_evaluable";
   // not_applicable counts as passing beside a met ("does not apply" is still
   // an answer), but never alone: a check or conversation whose criteria are
   // ALL not_applicable had nothing checked, so it is not_evaluable, never a
@@ -985,6 +1015,39 @@ function groupClaims(
     list.push(claim);
     byConversation.set(grouping.conversationId, list);
   }
+  // Result v0 section 3: a missing claim inside a covered requirement reads
+  // as not applicable only when the Result's excluded_not_applicable can
+  // account for it. The count names no requirement, so it accounts for all
+  // the missing claims or for none of them. A listed requirement no claim
+  // cites that this card draws no criterion for (another contract's, or one
+  // without the `<check>.<criterion>` shape) still used up one exclusion.
+  const contractRef = packRef(terms);
+  const cited = new Set(
+    result.claims.map((claim) =>
+      JSON.stringify([claim.contractRef, claim.requirementRef]),
+    ),
+  );
+  const reserved = (result.requirementsCovered ?? []).filter(
+    (ref) =>
+      !cited.has(JSON.stringify([ref.contractRef, ref.requirementRef])) &&
+      (ref.contractRef !== contractRef ||
+        criterionRef(ref.requirementRef) === undefined),
+  ).length;
+  let missing = 0;
+  for (const claims of byConversation.values())
+    for (const check of terms.checks)
+      for (const criterion of check.criteria)
+        if (
+          !claims.some(
+            (candidate) =>
+              candidate.requirementRef === `${check.id}.${criterion.id}`,
+          )
+        )
+          missing += 1;
+  const missingVerdict =
+    missing <= result.coverage.excludedNotApplicable - reserved
+      ? "not_applicable"
+      : "no_claim";
   const conversations: Conversation[] = [];
   const byDay = new Map<string, Conversation[]>();
   for (const [conversationId, claims] of byConversation) {
@@ -997,24 +1060,19 @@ function groupClaims(
         );
         if (claim === undefined) {
           // No claim for this criterion in this conversation. Evidence Result
-          // v0 has no verdict value for not_applicable (agent-action-capsule's
-          // spec/evidence-result-v0.md: "excluded from the evaluated
-          // population entirely... never as a claim") -- evidencebook-skills'
-          // result_v0.py therefore seals a not_applicable criterion with no
-          // claim at all, counted only in the bundle-wide
-          // aggregate.coverage.excluded_not_applicable. A conversation this
-          // card groups at all is already a complete one (the judge pipeline
-          // refuses an incomplete case before it reaches a Result v0
-          // document), so a missing criterion here is read as
-          // not_applicable, not as an unjudged gap -- consistent with the
-          // roll-up. This is the one place that
-          // attribution cannot be independently verified from this document
-          // alone (no digest, no rationale survives the exclusion); flagged
-          // here as the known limit, not hidden.
+          // v0 has no verdict value for not_applicable: evidencebook-skills'
+          // result_v0.py seals a not_applicable criterion with no claim at
+          // all, counted only in the bundle-wide
+          // aggregate.coverage.excluded_not_applicable. It reads as
+          // not_applicable only when that count accounts for every missing
+          // claim (missingVerdict above); otherwise it is a gap. Which
+          // criterion an exclusion belongs to cannot be verified from this
+          // document alone (no digest, no rationale survives the exclusion);
+          // flagged here as the known limit, not hidden.
           criteria.push({
             checkId: check.id,
             criterionId: criterion.id,
-            verdict: "not_applicable",
+            verdict: missingVerdict,
           });
           continue;
         }
@@ -1390,7 +1448,7 @@ function missedReasonGroups(
         c.verdict === "unsupported",
     );
     const notEvaluable = conversation.criteria.filter(
-      (c) => c.verdict === "not_evaluable",
+      (c) => c.verdict === "not_evaluable" || c.verdict === "no_claim",
     );
     const first = failing[0] ?? notEvaluable[0];
     if (first === undefined) continue;
@@ -1493,9 +1551,25 @@ export function readOutcomeReportTerms(result: ResultRoot): OutcomeReportTerms {
     checks.set(grouping.checkId, criteria);
   }
   const contractRef = contracts.size === 1 ? [...contracts][0]! : undefined;
-  const at = contractRef?.lastIndexOf("@") ?? -1;
+  // Result v0 section 3: a covered requirement no claim cites (one excluded
+  // everywhere) is still a criterion of the run. Without the list, every
+  // requirement of the cited contract is covered.
   const contract =
     contractRef === undefined ? undefined : citedContract(result, contractRef);
+  const coveredRefs =
+    result.requirementsCovered === undefined
+      ? contractCriteria(contract)
+      : result.requirementsCovered
+          .filter((covered) => covered.contractRef === contractRef)
+          .map((covered) => covered.requirementRef);
+  for (const ref of coveredRefs) {
+    const split = criterionRef(ref);
+    if (split === undefined) continue;
+    const criteria = checks.get(split.checkId) ?? [];
+    if (!criteria.includes(split.criterionId)) criteria.push(split.criterionId);
+    checks.set(split.checkId, criteria);
+  }
+  const at = contractRef?.lastIndexOf("@") ?? -1;
   const outcome = Array.isArray(contract?.requirements)
     ? contract.requirements.find(
         (r): r is ObjectValue =>
@@ -1532,6 +1606,47 @@ export function readOutcomeReportTerms(result: ResultRoot): OutcomeReportTerms {
     })),
     reasonCodes: {},
   };
+}
+
+/**
+ * The cited contract's criteria outside `requirements_covered` (Result v0
+ * section 3): not run. Only when the Result lists what it covered, and only
+ * the contract's `<checkId>.<criterionId>` requirements, the ones this card
+ * draws as criteria.
+ */
+function notRunCriteria(
+  result: ResultRoot,
+  terms: OutcomeReportTerms,
+): string[] {
+  const covered = result.requirementsCovered;
+  const contractRef = packRef(terms);
+  if (covered === undefined || contractRef === undefined) return [];
+  const listed = new Set(
+    covered
+      .filter((ref) => ref.contractRef === contractRef)
+      .map((ref) => ref.requirementRef),
+  );
+  return contractCriteria(citedContract(result, contractRef)).filter(
+    (id) => !listed.has(id),
+  );
+}
+
+/** The contract's requirement ids this card draws as criteria: the `<checkId>.<criterionId>` ones, each once, in order. */
+function contractCriteria(contract: ObjectValue | undefined): string[] {
+  const ids: string[] = [];
+  for (const requirement of (contract?.requirements as unknown[]) ?? []) {
+    const id = isObject(requirement) ? asString(requirement.id) : undefined;
+    if (id !== undefined && criterionRef(id) !== undefined && !ids.includes(id))
+      ids.push(id);
+  }
+  return ids;
+}
+
+/** The `<contract_id>@<version>` the terms name, when they name one. */
+function packRef(terms: OutcomeReportTerms): string | undefined {
+  return terms.pack.id === NOT_STATED || terms.pack.version === NOT_STATED
+    ? undefined
+    : `${terms.pack.id}@${terms.pack.version}`;
 }
 
 function buildDating(
@@ -1589,6 +1704,7 @@ export function buildOutcomeReportModel(
     );
   const notApplicableCount = countOf("not_applicable");
   const outOfScopeCount = countOf("out_of_scope");
+  const noClaimCount = countOf("no_claim");
   return {
     terms,
     options,
@@ -1608,6 +1724,8 @@ export function buildOutcomeReportModel(
     addedCount: added,
     notApplicableCount,
     outOfScopeCount,
+    noClaimCount,
+    notRun: notRunCriteria(result, terms),
     capsuleId: result.capsuleId,
   };
 }
