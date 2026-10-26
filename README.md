@@ -110,16 +110,17 @@ The producer consumes this repository's contract; this repository does not depen
 on the producer. The `go/` and `ts/` implementations here independently conform
 to the Python reference through the shared `vectors/` tree and cross-language CI.
 
-## Canonical Payload Binding (CPB)
+## CPB (Canonicalization Declaration)
 
-Agent Action Capsule is the first payload profile registered under the
-**Canonical Payload Binding** (CPB) profile — a payload-neutral SCITT binding
-(canonicalize → derive an identifier → bind a receipt → cite externals). CPB and
-its provisional registries have a dedicated repository:
+Agent Action Capsule is one payload profile that uses **CPB**,
+[`draft-mih-sokolov-scitt-payload-binding-05`](https://www.ietf.org/archive/id/draft-mih-sokolov-scitt-payload-binding-05.txt)
+("Canonicalization Declaration for SCITT Signed Statements"). A Capsule declares
+the canonicalization behind its derived identifier (`jcs`), named in the
+Canonicalization Algorithm Registry that CPB asks IANA to create. CPB keeps no
+registry of payload classes or artifact types, so a Capsule is declared under
+CPB, not registered in it.
+CPB's source and companion interop record live in
 **[action-state-group/scitt-payload-binding](https://github.com/action-state-group/scitt-payload-binding)**.
-
-The CPB `-00`, as posted, references this repository as its source; the `-01`
-revision updates that pointer to the dedicated repository.
 
 ## Transparency-layer design — VDS-agnostic
 
