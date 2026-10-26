@@ -321,6 +321,14 @@ export interface Conversation {
   /** The day its judge's reports were sealed under (`period`), whatever `dated` says. */
   readonly judgedDay: string;
   readonly criteria: readonly ConversationCriterion[];
+  /**
+   * Criteria whose claim is not yet in force (Result v0 section 4.3,
+   * contract-report-v1 section 2): readiness only, outside every tally, count
+   * and roll-up. Drawn in their own section, never merged with `criteria`; a
+   * later `not_met` is never a violation. A later claim that failed
+   * verification is not here: it stays in `criteria`, drawn failed.
+   */
+  readonly notYetInForce: readonly ConversationCriterion[];
   readonly checkVerdicts: ReadonlyMap<string, ConversationVerdict>;
   /** AND over every check, recomputed here (see `rollUp`) -- never asserted by any record. */
   readonly verdict: ConversationVerdict;
@@ -442,6 +450,16 @@ export interface OutcomeReportModel {
   readonly days: readonly OutcomeReportDay[];
   readonly dating: OutcomeReportDating;
   readonly conversations: readonly Conversation[];
+  /**
+   * Conversations whose every claim is not yet in force: in no day, count or
+   * roll-up (never "could not decide"), drawn only in the not-yet-in-force
+   * section. A conversation with both in-force and later claims stays in
+   * `conversations`, its later criteria in `Conversation.notYetInForce`. An
+   * all-later conversation has no in-force criterion: its `verdict` and
+   * `checkVerdicts` are the empty roll-up (`not_evaluable`) only as a
+   * placeholder, never a judgment a reader is shown.
+   */
+  readonly notYetInForce: readonly Conversation[];
   readonly runInfo: OutcomeReportRunInfo;
   readonly calibration: readonly CalibrationWeek[];
   readonly checkPassCounts: ReadonlyMap<string, number>;
@@ -999,7 +1017,11 @@ export function findTranscript(
 function groupClaims(
   result: ResultRoot,
   terms: OutcomeReportTerms,
-): { conversations: Conversation[]; days: Map<string, Conversation[]> } {
+): {
+  conversations: Conversation[];
+  days: Map<string, Conversation[]>;
+  notYetInForce: Conversation[];
+} {
   const order = checksById(terms);
   const byConversation = new Map<string, ResultClaim[]>();
   for (const claim of result.claims) {
@@ -1033,25 +1055,46 @@ function groupClaims(
       (ref.contractRef !== contractRef ||
         criterionRef(ref.requirementRef) === undefined),
   ).length;
+  // A conversation whose every drawn claim is later has no in-force
+  // criterion: it is outside the population, so its missing claims neither
+  // draw an entry nor use up an exclusion (Result v0 section 4.3).
+  const allLater = new Set<string>();
+  for (const [conversationId, claims] of byConversation) {
+    const drawn = terms.checks.flatMap((check) =>
+      check.criteria.flatMap((criterion) => {
+        const claim = claims.find(
+          (candidate) =>
+            candidate.requirementRef === `${check.id}.${criterion.id}`,
+        );
+        return claim === undefined ? [] : [claim];
+      }),
+    );
+    if (drawn.length > 0 && drawn.every((c) => c.later && !c.failed))
+      allLater.add(conversationId);
+  }
   let missing = 0;
-  for (const claims of byConversation.values())
-    for (const check of terms.checks)
-      for (const criterion of check.criteria)
-        if (
-          !claims.some(
-            (candidate) =>
-              candidate.requirementRef === `${check.id}.${criterion.id}`,
+  for (const [conversationId, claims] of byConversation)
+    if (!allLater.has(conversationId))
+      for (const check of terms.checks)
+        for (const criterion of check.criteria)
+          if (
+            !claims.some(
+              (candidate) =>
+                candidate.requirementRef === `${check.id}.${criterion.id}`,
+            )
           )
-        )
-          missing += 1;
+            missing += 1;
   const missingVerdict =
     missing <= result.coverage.excludedNotApplicable - reserved
       ? "not_applicable"
       : "no_claim";
   const conversations: Conversation[] = [];
+  const notYetInForce: Conversation[] = [];
   const byDay = new Map<string, Conversation[]>();
   for (const [conversationId, claims] of byConversation) {
     const criteria: ConversationCriterion[] = [];
+    const laterCriteria: ConversationCriterion[] = [];
+    const isAllLater = allLater.has(conversationId);
     for (const check of terms.checks) {
       for (const criterion of check.criteria) {
         const claim = claims.find(
@@ -1069,17 +1112,18 @@ function groupClaims(
           // criterion an exclusion belongs to cannot be verified from this
           // document alone (no digest, no rationale survives the exclusion);
           // flagged here as the known limit, not hidden.
-          criteria.push({
-            checkId: check.id,
-            criterionId: criterion.id,
-            verdict: missingVerdict,
-          });
+          if (!isAllLater)
+            criteria.push({
+              checkId: check.id,
+              criterionId: criterion.id,
+              verdict: missingVerdict,
+            });
           continue;
         }
         // Result v0 section 4.3: a claim not yet in force is readiness only,
-        // outside the population; this deprecated card draws no criterion
-        // for it, unless it failed verification: a failure is still drawn.
-        if (claim.later && !claim.failed) continue;
+        // outside the population: kept apart in `laterCriteria`, never in a
+        // tally, unless it failed verification: a failure is still drawn.
+        const target = claim.later && !claim.failed ? laterCriteria : criteria;
         const judgment = reportPayload(result.records, claim);
         const rationale = judgment ? asString(judgment.rationale) : undefined;
         const reasonCode = judgment
@@ -1101,7 +1145,7 @@ function groupClaims(
         const cited = claim.evidence[0]?.digest;
         const record =
           cited === undefined ? undefined : result.records.get(cited);
-        criteria.push({
+        target.push({
           checkId: check.id,
           criterionId: criterion.id,
           claim,
@@ -1123,7 +1167,9 @@ function groupClaims(
         });
       }
     }
-    const firstClaim = criteria.find((c) => c.claim !== undefined)?.claim;
+    const firstClaim = [...criteria, ...laterCriteria].find(
+      (c) => c.claim !== undefined,
+    )?.claim;
     const judgedDay =
       (firstClaim === undefined
         ? undefined
@@ -1134,7 +1180,7 @@ function groupClaims(
       checkVerdicts.set(check.id, rollUp(forCheck.map((c) => c.verdict)));
     }
     const sources = new Set(
-      criteria.flatMap((c) =>
+      [...criteria, ...laterCriteria].flatMap((c) =>
         c.sourceCapsuleId === undefined ? [] : [c.sourceCapsuleId],
       ),
     );
@@ -1181,20 +1227,26 @@ function groupClaims(
       dated,
       judgedDay,
       criteria,
+      notYetInForce: laterCriteria,
       checkVerdicts,
       verdict: rollUp(criteria.map((c) => c.verdict)),
     };
+    if (isAllLater) {
+      notYetInForce.push(conversation);
+      continue;
+    }
     conversations.push(conversation);
     const dayList = byDay.get(date) ?? [];
     dayList.push(conversation);
     byDay.set(date, dayList);
   }
-  conversations.sort((a, b) =>
+  const byId = (a: Conversation, b: Conversation): number =>
     a.day === b.day
       ? a.conversationId.localeCompare(b.conversationId)
-      : a.day.localeCompare(b.day),
-  );
-  return { conversations, days: byDay };
+      : a.day.localeCompare(b.day);
+  conversations.sort(byId);
+  notYetInForce.sort(byId);
+  return { conversations, days: byDay, notYetInForce };
 }
 
 /** Every criterion's tier, read from the claims that cite it -- see `CriterionTierReading`. A criterion with zero claims anywhere in this bundle reads "unknown"; one whose claims disagree reads "mixed", never an arbitrary pick. */
@@ -1672,7 +1724,7 @@ export function buildOutcomeReportModel(
   options: OutcomeReportOptions,
 ): OutcomeReportModel {
   const terms = readOutcomeReportTerms(result);
-  const { conversations, days } = groupClaims(result, terms);
+  const { conversations, days, notYetInForce } = groupClaims(result, terms);
   const dayList: OutcomeReportDay[] = [...days.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, convos]) => ({
@@ -1711,6 +1763,7 @@ export function buildOutcomeReportModel(
     days: dayList,
     dating: buildDating(conversations),
     conversations,
+    notYetInForce,
     runInfo: buildRunInfo(result, conversations),
     calibration,
     checkPassCounts,
